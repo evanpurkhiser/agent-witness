@@ -1,0 +1,10 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+authors = ["Evan Purkhiser"]
+repository = "https://github.com/evanpurkhiser/agent-witness"
+homepage = "https://github.com/evanpurkhiser/agent-witness"

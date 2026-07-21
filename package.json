@@ -1,0 +1,28 @@
+{
+  "name": "agent-witness",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A remote SSH agent that lets autonomous agents securely authenticate using keys that never leave your devices",
+  "license": "MIT",
+  "author": "Evan Purkhiser",
+  "scripts": {
+    "lint": "oxlint .",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check ."
+  },
+  "devDependencies": {
+    "@evanpurkhiser/oxc-config": "^0.8.0",
+    "oxfmt": "^0.47.0",
+    "oxlint": "^1.62.0"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "11.15.1"
+    },
+    "runtime": {
+      "name": "node",
+      "version": "^24.15.0"
+    }
+  }
+}
