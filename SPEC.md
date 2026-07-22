@@ -3,6 +3,28 @@
 A remote SSH agent that lets autonomous agents securely authenticate using keys
 that never leave your devices.
 
+## Implementation status
+
+This spec describes the whole system; much of it is still design. The
+security-sensitive client core is built and unit-tested (Vitest); the live
+session wiring and the server are not yet written.
+
+**Implemented (client vault core):** SSH key parsing (`openssh-key-v1`), SSH
+wire encoding, public-key fingerprints, the WebCrypto envelope (passkey → master
+key → per-key wrapping), IndexedDB storage, and the typestate vault API.
+
+**Not yet implemented (still as designed below):** the dedicated worker's live
+session wiring and page↔worker message protocol, the ssh-agent protocol
+handling, the WebSocket transport, signing over the wire, the service worker and
+Web Push, and the entire Rust server (Unix socket, request broker, push,
+pairing).
+
+Note: there is **no Rust/WASM on the client**. A spike proved a hand-rolled
+ssh-agent in TypeScript authenticates against a real OpenSSH `sshd`, and Ed25519
+WebCrypto works on-device (iOS 17+). The security-sensitive core is TypeScript
+driving WebCrypto, running in a dedicated Web Worker. Rust lives only in the
+server (`crates/server`).
+
 ## Motivation
 
 There needs to be a way to authenticate SSH agent requests remotely from a
@@ -26,10 +48,13 @@ This project will solve that, within the following constraints:
 - A salt is stored alongside the vault.
 - If you lose the passkey the vault is lost. This should **not** be considered
   the only storage for private keys.
-- A WebAuthn PRF extension passkey is used to encrypt and decrypt the SSH key.
-- Encryption and decryption will happen in a WASM worker.
-- The WASM worker implements an ssh-agent. Data is shuttled from the worker to
-  the remote server via a WebSocket. All keys from the vault are presented.
+- A WebAuthn PRF extension passkey is used to derive the key that encrypts and
+  decrypts the SSH keys.
+- Encryption, decryption, and signing happen in a dedicated Web Worker using
+  WebCrypto (TypeScript, no WASM). Private keys are held as non-extractable
+  `CryptoKey`s, so raw private-key bytes never persist in JS.
+- The worker implements an ssh-agent. Data is shuttled from the worker to the
+  remote server via a WebSocket. All keys from the vault are presented.
 - All agent requests will be approved for the duration the worker stays
   connected and the vault unlocked.
 - The web app can be installed as a PWA on iOS and will register a push
@@ -59,16 +84,18 @@ This project will solve that, within the following constraints:
 
 **Server app**
 
-- Rust
-- Frontend app, service worker WASM, etc. is baked in at compile time
+- Rust (the only Rust in the project — see `crates/server`)
+- The built frontend assets are baked in at compile time
 
 **Frontend**
 
 - React / Vite
+- TypeScript throughout, including the dedicated Web Worker that owns the
+  security-sensitive core. All crypto is WebCrypto; there is no WASM.
 
 **Service worker**
 
-- TypeScript / Rust WASM / Vite?
+- TypeScript / Vite (push wake-up and asset caching only)
 
 The server runs as a systemd service and listens on a Unix socket for local
 SSH-agent clients. Its browser-facing WebSocket endpoint must use TLS.
@@ -149,21 +176,22 @@ It should not receive the signing payload or private-key material.
 
 ### Dedicated Web Worker
 
-Owns the live agent session and isolates sensitive operations from normal UI
-code.
+Owns the live agent session and the security-sensitive core, isolating sensitive
+operations from normal UI code. This is where key handling, the vault, and
+signing live — in TypeScript over WebCrypto, not in WASM.
 
 **Responsibilities:**
 
-- Instantiate the WASM module
 - Receive transferred PRF output from the page
-- Load the encrypted vault from IndexedDB
-- Pass encrypted vault data and unlock material into WASM
+- Load the vault and encrypted key blobs from IndexedDB
+- Derive the wrapping key and unlock the vault (recover the master key)
+- Hold unlocked keys as non-extractable `CryptoKey`s
 - Open and maintain the WebSocket
 - Receive remote agent messages
-- Pass agent packets into WASM
+- Implement the ssh-agent protocol and produce signatures via WebCrypto
 - Return encoded responses over the WebSocket
 - Notify the page about connection and request state
-- Lock and destroy the WASM agent state when disconnected
+- Lock and drop the resident master key and signing keys when disconnected
 - Enforce idle and session timeouts
 
 **Should not:**
@@ -172,7 +200,7 @@ code.
 - Invoke WebAuthn
 - Handle push notifications
 - Interpret React state
-- Store plaintext private keys outside WASM
+- Expose private-key material or the decrypted master key to the page
 
 The worker is the owner of the active session:
 
@@ -182,35 +210,59 @@ WebSocket lifetime ≈ unlocked-agent lifetime ≈ worker lifetime
 
 When the worker terminates, the server should treat the agent as unavailable.
 
-### WASM module
+### Vault core (crypto and protocol)
 
-Owns the security-sensitive and protocol-sensitive core.
+The security-sensitive and protocol-sensitive core, implemented in TypeScript
+over WebCrypto and run inside the dedicated worker. The vault core is built and
+unit-tested; the ssh-agent protocol handling on top of it is not yet written.
 
 **Responsibilities:**
 
-- Derive the vault wrapping key from the PRF output and salt
-- Decrypt and authenticate the vault
-- Parse the vault format
-- Parse OpenSSH private keys
-- Hold decrypted key material in WASM memory
-- Implement the SSH-agent protocol
-- Process identity-list requests
-- Process signing requests
-- Process supported extensions
+- Derive the wrapping key from the PRF output and per-passkey salt
+- Recover the master key from any enrolled passkey
+- Parse OpenSSH private keys (`openssh-key-v1`, cipher "none")
+- Import keys as non-extractable signing `CryptoKey`s
+- Implement the SSH-agent protocol (identity list, signing, extensions)
 - Enforce key and request policies
-- Produce SSH signatures
+- Produce SSH signatures via WebCrypto
 - Encode SSH-agent responses
-- Clear sensitive memory when locked or dropped
+- Drop the resident master key and signing keys when locked or dropped
 
-**Potential interface:**
+**Crypto / envelope design (implemented):**
 
-```rust
-create_agent(encrypted_vault, prf_output, salt) -> AgentHandle
-list_public_identities(handle) -> Vec<Identity>
-handle_agent_packet(handle, packet) -> Vec<u8>
-set_request_context(handle, context)
-lock_agent(handle)
+- The WebAuthn PRF output plus a stored per-passkey salt feed **HKDF-SHA256**
+  (`deriveWrappingKey`) to produce a non-extractable AES-GCM **wrapping key**.
+  The PRF output is already high-entropy, so there is no Argon2/PBKDF2.
+- A random AES-GCM **master key** (`generateMasterKey`) is wrapped under each
+  enrolled passkey's wrapping key and stored (`wrappedMasterKey`). Multiple
+  passkeys can be enrolled; unlock tries each and succeeds on the first match.
+- Each SSH private key is imported into a WebCrypto `CryptoKey` and wrapped under
+  the master key with AES-GCM (`wrapSSHKey`), with the key id bound as AEAD
+  associated data. The encrypted blob is stored separately from its metadata.
+- After unlock, all keys are held **non-extractable** and signing is done via
+  WebCrypto, so raw private-key bytes never persist in JS. Ed25519 requires
+  iOS 17+.
+- Envelope blob format throughout is `nonce(12) || AES-GCM ciphertext`.
+- Supported key types: `ssh-ed25519`, `ssh-rsa`, `ecdsa-sha2-nistp256`.
+
+**Vault API (typestate machine, implemented):**
+
+`openVault(store)` returns `NoVault | LockedVault`. Each state exposes only the
+transitions valid from it, so state-invalid operations are unrepresentable at
+the type level:
+
+```ts
+NoVault.createVault(params) -> UnlockedVault
+LockedVault.unlock(prfOutput) -> UnlockedVault
+UnlockedVault.addKey(pem, name?) -> UnlockedVault
+UnlockedVault.lock() -> LockedVault
+// shared by both loaded states:
+removeKey(keyId) -> Self
+destroy() -> NoVault
 ```
+
+Errors are narrowed to `WrongPasskey` and `DuplicateKey`, plus the SSH parse
+errors `InvalidKeyFormat` and `UnsupportedKey`.
 
 **Should not:**
 
@@ -219,7 +271,7 @@ lock_agent(handle)
 - Render approval UI
 - Invoke WebAuthn directly
 - Depend on React or browser page state
-- Store persistent data itself unless exposed through a narrow storage adapter
+- Expose the master key or private-key material to the page
 
 ## Message boundaries
 
@@ -265,14 +317,16 @@ type WorkerToPage =
 No private keys, decrypted vault contents, or raw signing payloads should be
 sent back.
 
-### Web Worker ↔ WASM
+### Worker-internal (vault core)
 
-Binary and structured security inputs:
+The security-sensitive core is not a separate module boundary — it is TypeScript
+running inside the worker. Its inputs and outputs are the worker's own state:
 
-- Encrypted vault bytes
-- PRF output
-- Vault salt
-- SSH-agent packets
+Inputs:
+
+- PRF output (transferred from the page)
+- The vault record and encrypted key blobs loaded from IndexedDB
+- SSH-agent packets from the WebSocket
 - Trusted request context
 - Policy configuration
 
@@ -287,25 +341,30 @@ Outputs:
 
 ### IndexedDB
 
-Store:
+Backed by the `idb` library (see `vault/storage.ts`). Byte fields are stored as
+raw bytes (structured-cloned), not base64. Two object stores:
 
-- Encrypted vault
-- Vault salt
-- Credential ID
-- Server pairing records
-- Push subscription information
-- Non-sensitive preferences
-- Encrypted audit records, if desired
+- `vault`: a single `Vault` record — `id`, `version`, `createdAt`, `passkeys[]`
+  (each an `EnrolledPasskey`: `label`, `credentialId`, `salt`,
+  `wrappedMasterKey`, `addedAt`), and `keys[]` (per-key `PrivateKeyMeta`:
+  `id`, `name`, `type`, `publicKey`, `fingerprint`, `comment`, `addedAt`)
+- `keys`: each SSH key's encrypted private blob (`EncryptedKey`), keyed by the
+  owning key's id and written in the same transaction as the vault record
 
-### WASM memory
+Still to be added alongside these: server pairing records, push subscription
+information, non-sensitive preferences, and optional encrypted audit records.
 
-Store only while unlocked:
+### Worker memory
 
-- Vault master key (memory zeroed after decrypting the vault)
-- Decrypted private keys
-- Parsed signing keys
+Held only while unlocked:
+
+- Vault master key, as a non-extractable `CryptoKey`
+- Per-key signing keys, as non-extractable `CryptoKey`s
 - Active request context
 - Authorization lease state
+
+Because keys are non-extractable `CryptoKey`s, plaintext key bytes are never
+resident in JS; dropping the references discards them when the vault locks.
 
 ### Page state
 
@@ -326,19 +385,18 @@ Store:
 
 ## Recommended trust model
 
-| Component        | Trusted for                                              |
-| ---------------- | -------------------------------------------------------- |
-| Service worker   | Notification routing                                     |
-| Page             | UI and initiating WebAuthn                               |
-| Dedicated worker | Session orchestration                                    |
-| WASM             | Key handling, policy, and signing                        |
-| Server           | Requesting signatures, but not trusted with private keys |
-| Relay/network    | Untrusted beyond authenticated encrypted transport       |
+| Component        | Trusted for                                                               |
+| ---------------- | ------------------------------------------------------------------------- |
+| Service worker   | Notification routing                                                      |
+| Page             | UI and initiating WebAuthn                                                |
+| Dedicated worker | Session orchestration, key handling, policy, and signing (TS + WebCrypto) |
+| Server           | Requesting signatures, but not trusted with private keys                  |
+| Relay/network    | Untrusted beyond authenticated encrypted transport                        |
 
 The most important boundary is: **the page obtains the WebAuthn result, but the
-dedicated worker and WASM module own everything after unlock.** That keeps the UI
-layer thin while avoiding the unreliable lifecycle of placing the live agent
-inside the service worker.
+dedicated worker owns everything after unlock.** That keeps the UI layer thin
+while avoiding the unreliable lifecycle of placing the live agent inside the
+service worker.
 
 ## Server daemon
 
