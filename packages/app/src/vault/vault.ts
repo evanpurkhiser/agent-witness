@@ -110,6 +110,19 @@ export interface UnlockedVault extends LoadedVault<UnlockedVault> {
 export type VaultState = NoVault | LockedVault | UnlockedVault;
 
 /**
+ * Assert the vault is in one of the given states, narrowing it to match, and
+ * throw a `VaultError` otherwise.
+ */
+export function assertVaultStatus<S extends VaultState['status']>(
+  state: VaultState,
+  ...statuses: readonly S[]
+): asserts state is Extract<VaultState, {status: S}> {
+  if (!(statuses as readonly string[]).includes(state.status)) {
+    throw new VaultError(`vault is ${state.status}, expected ${statuses.join(' or ')}`);
+  }
+}
+
+/**
  * Build and persist a new vault, returning it with its resident master key.
  */
 async function createNewVault(

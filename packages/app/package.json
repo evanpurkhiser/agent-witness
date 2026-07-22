@@ -11,7 +11,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "comlink": "^4.4.2",
     "idb": "^8.0.0",
+    "passkey-authenticator-aaguids": "^1.0.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
