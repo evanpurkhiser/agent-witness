@@ -3,6 +3,7 @@
 // and recovered as non-extractable signing keys.
 
 import {seal, unseal} from 'app/crypto/utils';
+import {Writer} from 'app/ssh/encoding';
 import type {ParsedKey} from 'app/ssh/key';
 import {b64urlencode, concatBytes, type Bytes} from 'app/utils/bytes';
 
@@ -11,6 +12,12 @@ const te = new TextEncoder();
 
 type KeyType = ParsedKey['type'];
 type RsaHash = 'SHA-256' | 'SHA-512';
+
+/**
+ * The RSA signature algorithm a SIGN_REQUEST asks for (modern OpenSSH; SHA-1
+ * ssh-rsa is not supported).
+ */
+export type RsaFlavor = 'rsa-sha2-256' | 'rsa-sha2-512';
 
 /**
  * Fixed PKCS#8 DER prefix for an Ed25519 private key, wrapping the 32-byte seed.
@@ -176,4 +183,39 @@ export function unwrapSSHKey(
     ['sign'],
     te.encode(keyId),
   );
+}
+
+/**
+ * Sign `data` with a recovered signing key, returning the SSH signature blob
+ * (algorithm name + signature) that a SIGN_RESPONSE carries. ECDSA's raw r‖s is
+ * re-encoded as the two SSH mpints OpenSSH expects.
+ */
+export async function sshSign(
+  signingKey: CryptoKey,
+  type: KeyType,
+  data: Bytes,
+  rsaFlavor: RsaFlavor = 'rsa-sha2-256',
+): Promise<Bytes> {
+  if (type === 'ssh-ed25519') {
+    const signature = new Uint8Array(
+      await subtle.sign({name: 'Ed25519'}, signingKey, data),
+    );
+    return new Writer().string('ssh-ed25519').string(signature).finish();
+  }
+
+  if (type === 'ecdsa-sha2-nistp256') {
+    const raw = new Uint8Array(
+      await subtle.sign({name: 'ECDSA', hash: 'SHA-256'}, signingKey, data),
+    );
+    const inner = new Writer()
+      .mpint(raw.subarray(0, 32))
+      .mpint(raw.subarray(32, 64))
+      .finish();
+    return new Writer().string('ecdsa-sha2-nistp256').string(inner).finish();
+  }
+
+  const signature = new Uint8Array(
+    await subtle.sign({name: 'RSASSA-PKCS1-v1_5'}, signingKey, data),
+  );
+  return new Writer().string(rsaFlavor).string(signature).finish();
 }

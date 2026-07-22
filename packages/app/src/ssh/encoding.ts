@@ -3,7 +3,7 @@
 // bytes. An "mpint" is a big-endian two's-complement signed integer, itself
 // encoded as a string.
 
-import {concatBytes} from 'app/utils/bytes';
+import {type Bytes, concatBytes} from 'app/utils/bytes';
 
 const te = new TextEncoder();
 const td = new TextDecoder();
@@ -150,7 +150,7 @@ export class Writer {
   /**
    * Flatten all appended chunks into a single buffer.
    */
-  finish(): Uint8Array {
+  finish(): Bytes {
     return concatBytes(...this.#chunks);
   }
 }

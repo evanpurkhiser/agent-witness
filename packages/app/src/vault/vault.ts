@@ -10,9 +10,11 @@ import {
   wrapMasterKey,
 } from 'app/crypto/master-key';
 import {importSSHKey, wrapSSHKey} from 'app/crypto/ssh';
+import type {AgentBackend} from 'app/ssh/agent';
 import {sshFingerprint} from 'app/ssh/fingerprint';
 import {parseOpenSSHPrivateKey} from 'app/ssh/key';
 import type {Bytes} from 'app/utils/bytes';
+import {createAgentBackend} from 'app/vault/agent-backend';
 import type {VaultStore} from 'app/vault/storage';
 import type {PrivateKeyMeta, Vault} from 'app/vault/types';
 
@@ -98,6 +100,11 @@ export interface UnlockedVault extends LoadedVault<UnlockedVault> {
    * `DuplicateKey` if the key is already present.
    */
   addKey(pem: string, name?: string): Promise<UnlockedVault>;
+  /**
+   * An ssh-agent backend serving this vault's keys. Available only while
+   * unlocked, since signing needs the resident master key.
+   */
+  agentBackend(): AgentBackend;
   /**
    * Drop the resident master key, returning to the locked state.
    */
@@ -278,6 +285,9 @@ function unlockedVault(
     },
     async removeKey(keyId) {
       return unlockedVault(store, await storeRemoveKey(store, vault, keyId), masterKey);
+    },
+    agentBackend() {
+      return createAgentBackend(store, vault, masterKey);
     },
     lock() {
       return lockedVault(store, vault);
