@@ -2,9 +2,7 @@ import 'fake-indexeddb/auto';
 
 import {describe, expect, it} from 'vitest';
 
-import {readFileSync} from 'node:fs';
-
-import {expectVaultState} from 'app/test-helpers';
+import {expectVaultState, keyFixture} from 'app/test-helpers';
 import {random} from 'app/utils/bytes';
 import {openVaultStore, type VaultStore} from 'app/vault/storage';
 import {
@@ -17,16 +15,6 @@ import {
 
 // Ground-truth fingerprint from `ssh-keygen -lf ed25519.pub`.
 const ED25519_FINGERPRINT = 'SHA256:wCyFHQrqFBBRWCuNhhcbEGlxmNh8w/nfJ1Bpf64T1Bc';
-
-/**
- * Read a private-key fixture as PEM text.
- */
-function fixture(name: string): string {
-  return readFileSync(
-    new URL(`../../../../fixtures/keys/${name}`, import.meta.url),
-    'utf8',
-  );
-}
 
 /**
  * Fresh create-vault material.
@@ -107,7 +95,7 @@ describe('managing keys', () => {
   it('adds a key and records its metadata', async () => {
     const unlocked = await (
       await createUnlocked(await freshStore())
-    ).addKey(fixture('ed25519'));
+    ).addKey(keyFixture('ed25519'));
 
     expect(unlocked.vault.keys).toHaveLength(1);
     const [key] = unlocked.vault.keys;
@@ -119,7 +107,7 @@ describe('managing keys', () => {
 
   it('stores the encrypted key blob alongside the metadata', async () => {
     const store = await freshStore();
-    const unlocked = await (await createUnlocked(store)).addKey(fixture('ed25519'));
+    const unlocked = await (await createUnlocked(store)).addKey(keyFixture('ed25519'));
 
     expect(await store.getKey(unlocked.vault.keys[0].id)).not.toBeNull();
   });
@@ -127,7 +115,7 @@ describe('managing keys', () => {
   it('honors an explicit key name', async () => {
     const unlocked = await (
       await createUnlocked(await freshStore())
-    ).addKey(fixture('ed25519'), 'work laptop');
+    ).addKey(keyFixture('ed25519'), 'work laptop');
 
     expect(unlocked.vault.keys[0].name).toBe('work laptop');
   });
@@ -135,14 +123,14 @@ describe('managing keys', () => {
   it('rejects a duplicate key', async () => {
     const unlocked = await (
       await createUnlocked(await freshStore())
-    ).addKey(fixture('ed25519'));
+    ).addKey(keyFixture('ed25519'));
 
-    await expect(unlocked.addKey(fixture('ed25519'))).rejects.toThrow(DuplicateKey);
+    await expect(unlocked.addKey(keyFixture('ed25519'))).rejects.toThrow(DuplicateKey);
   });
 
   it('removes a key and its blob', async () => {
     const store = await freshStore();
-    const unlocked = await (await createUnlocked(store)).addKey(fixture('ed25519'));
+    const unlocked = await (await createUnlocked(store)).addKey(keyFixture('ed25519'));
     const {id} = unlocked.vault.keys[0];
 
     const after = await unlocked.removeKey(id);
@@ -153,7 +141,7 @@ describe('managing keys', () => {
 
   it('removes a key while locked', async () => {
     const store = await freshStore();
-    const unlocked = await (await createUnlocked(store)).addKey(fixture('ed25519'));
+    const unlocked = await (await createUnlocked(store)).addKey(keyFixture('ed25519'));
     const {id} = unlocked.vault.keys[0];
 
     const after = await unlocked.lock().removeKey(id);
@@ -166,7 +154,7 @@ describe('managing keys', () => {
 describe('destroying', () => {
   it('deletes the vault and its keys', async () => {
     const store = await freshStore();
-    const unlocked = await (await createUnlocked(store)).addKey(fixture('ed25519'));
+    const unlocked = await (await createUnlocked(store)).addKey(keyFixture('ed25519'));
     const {id} = unlocked.vault.keys[0];
 
     const empty = await unlocked.destroy();

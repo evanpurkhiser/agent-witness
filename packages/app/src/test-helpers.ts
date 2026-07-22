@@ -1,7 +1,31 @@
 import {expect} from 'vitest';
 
-import type {ParsedKey} from 'app/ssh/key';
+import {readFileSync} from 'node:fs';
+
+import {parseOpenSSHPrivateKey, type ParsedKey} from 'app/ssh/key';
+import {b64decode, type Bytes} from 'app/utils/bytes';
 import type {VaultState} from 'app/vault/vault';
+
+/**
+ * Read a key fixture (from the repo-root fixtures/keys directory) as text.
+ */
+export function keyFixture(name: string): string {
+  return readFileSync(new URL(`../../../fixtures/keys/${name}`, import.meta.url), 'utf8');
+}
+
+/**
+ * Parse a private-key fixture into its `ParsedKey`.
+ */
+export function parseKeyFixture(name: string): ParsedKey {
+  return parseOpenSSHPrivateKey(keyFixture(name));
+}
+
+/**
+ * The base64-decoded public key blob from a `.pub` fixture file.
+ */
+export function pubKeyFixture(name: string): Bytes {
+  return b64decode(keyFixture(`${name}.pub`).split(/\s+/)[1]);
+}
 
 /**
  * Assert a parsed key's algorithm and narrow it to the matching variant, so
