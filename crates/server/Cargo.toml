@@ -8,7 +8,11 @@ repository.workspace = true
 
 [dependencies]
 bytes = "1"
+figment = { version = "0.10", features = ["toml"] }
 futures-util = { version = "0.3", features = ["sink"] }
+humantime = "2"
+humantime-serde = "1"
+serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 tokio = { version = "1", features = [
   "io-util",
