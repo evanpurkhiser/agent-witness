@@ -24,3 +24,21 @@ pnpm build:production
 The resulting `target/release/agent-witness` binary contains the complete Vite
 application and does not need `packages/app/dist` at runtime. Production
 deployments should terminate TLS in front of its HTTP listener.
+
+## Pairing state
+
+Pairing remains process-local when `state_path` is omitted. Configure a state
+file to retain the server identity and paired client across restarts:
+
+```toml
+state_path = "/var/lib/agent-witness/state.json"
+control_socket = "/run/agent-witness/control.sock"
+control_socket_mode = "0600"
+```
+
+The state file is atomically replaced with mode `0600` and contains only the
+client credential hash. Clear the current pairing through the running daemon:
+
+```console
+agent-witness pairing clear
+```

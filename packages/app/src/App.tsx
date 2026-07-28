@@ -15,6 +15,7 @@ export function App() {
     unlock,
     connect,
     disconnect,
+    forgetPairing,
     lock,
     destroy,
     addKey,
@@ -72,6 +73,11 @@ export function App() {
             onClick={connect}
           >
             {connection.status === 'connecting' ? 'Connecting…' : 'Connect'}
+          </button>
+        )}
+        {connection.status === 'rejected' && (
+          <button type="button" disabled={working} onClick={forgetPairing}>
+            Forget pairing and reconnect
           </button>
         )}
       </section>

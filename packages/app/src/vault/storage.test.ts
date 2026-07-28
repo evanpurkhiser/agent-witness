@@ -110,6 +110,9 @@ describe('VaultStore', () => {
     await store.destroy();
 
     expect(await store.loadPairing(pairing.endpoint)).toEqual(pairing);
+
+    await store.deletePairing(pairing.endpoint);
+    expect(await store.loadPairing(pairing.endpoint)).toBeNull();
   });
 
   it('destroys the vault and all keys', async () => {

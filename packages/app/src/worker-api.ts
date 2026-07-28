@@ -81,6 +81,10 @@ export interface WorkerApi {
    */
   disconnect(): Promise<WorkerSnapshot>;
   /**
+   * Remove the stored credential for one server without changing the vault.
+   */
+  forgetPairing(endpoint: string): Promise<WorkerSnapshot>;
+  /**
    * Create the vault from a passkey's PRF material, leaving it unlocked.
    */
   createVault(params: CreateVaultParams): Promise<WorkerSnapshot>;

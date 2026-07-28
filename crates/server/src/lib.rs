@@ -2,6 +2,7 @@ pub mod agent_socket;
 pub mod broker;
 pub mod cli;
 pub mod config;
+pub mod control;
 pub mod daemon;
 pub mod packet;
 pub mod remote;

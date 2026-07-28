@@ -91,6 +91,15 @@ export function useWorker() {
     [run],
   );
   const disconnect = useCallback(() => run(() => worker.disconnect()), [run]);
+  const forgetPairing = useCallback(
+    () =>
+      run(async () => {
+        const endpoint = websocketEndpoint();
+        await worker.forgetPairing(endpoint);
+        return worker.connect(endpoint, 'Browser');
+      }),
+    [run],
+  );
   const lock = useCallback(() => run(() => worker.lock()), [run]);
   const destroy = useCallback(() => run(() => worker.destroy()), [run]);
   const addKey = useCallback((pem: string) => run(() => worker.addKey(pem)), [run]);
@@ -107,6 +116,7 @@ export function useWorker() {
     unlock,
     connect,
     disconnect,
+    forgetPairing,
     lock,
     destroy,
     addKey,

@@ -38,6 +38,8 @@ class WorkerSession implements WorkerApi {
         this.#currentStore().then(store => store.loadPairing(endpoint)),
       savePairing: pairing =>
         this.#currentStore().then(store => store.savePairing(pairing)),
+      deletePairing: endpoint =>
+        this.#currentStore().then(store => store.deletePairing(endpoint)),
     },
     handleRequest: packet => this.#handleRequest(packet),
     onChange: () => void this.#publish(),
@@ -105,6 +107,11 @@ class WorkerSession implements WorkerApi {
 
   disconnect(): Promise<WorkerSnapshot> {
     this.#remote.disconnect();
+    return this.#snapshot();
+  }
+
+  async forgetPairing(endpoint: string): Promise<WorkerSnapshot> {
+    await this.#remote.forgetPairing(endpoint);
     return this.#snapshot();
   }
 

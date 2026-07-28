@@ -28,13 +28,15 @@ async fn websocket_adapts_a_remote_worker_to_the_broker() {
         incoming_requests,
     );
     let shutdown = CancellationToken::new();
-    let pairing = PairingService::open(Arc::new(MemoryPairingStore::new()))
-        .await
-        .unwrap();
+    let pairing = Arc::new(
+        PairingService::open(Arc::new(MemoryPairingStore::new()))
+            .await
+            .unwrap(),
+    );
     let app = web::router(
         SessionConfig {
             broker: broker.clone(),
-            pairing: Arc::new(pairing),
+            pairing: pairing.clone(),
             remote_capacity: 1,
             shutdown: shutdown.clone(),
         },
@@ -135,7 +137,15 @@ async fn websocket_adapts_a_remote_worker_to_the_broker() {
         Err(RequestError::Cancelled)
     );
 
-    remote.close(None).await.unwrap();
+    assert!(pairing.clear().await.unwrap());
+    match tokio::time::timeout(Duration::from_secs(1), remote.next())
+        .await
+        .unwrap()
+    {
+        None | Some(Ok(Message::Close(_))) | Some(Err(_)) => {}
+        Some(Ok(message)) => panic!("expected remote session to close, received {message:?}"),
+    }
+
     shutdown.cancel();
     broker.shutdown().await;
     broker_task.await.unwrap();

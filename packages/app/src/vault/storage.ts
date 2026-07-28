@@ -96,6 +96,10 @@ export async function openVaultStore(name: string = DB_NAME): Promise<VaultStore
       await db.put('pairings', pairing);
     },
 
+    async deletePairing(endpoint) {
+      await db.delete('pairings', endpoint);
+    },
+
     async destroy() {
       const tx = db.transaction(['vault', 'keys'], 'readwrite');
       await Promise.all([

@@ -13,6 +13,7 @@ use crate::{
     agent_socket::AgentSocket,
     broker::{BrokerConfig, BrokerHandle},
     config::Config,
+    control::ControlSocket,
     remote::{
         FilePairingStore, MemoryPairingStore, PairingService, PairingStore, SessionConfig,
         protocol::MAX_MESSAGE_OVERHEAD,
@@ -35,6 +36,8 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         config.max_agent_packet_size,
     )
     .await?;
+    let control_socket =
+        ControlSocket::bind(config.control_socket.clone(), config.control_socket_mode).await?;
     let http_listener = TcpListener::bind(config.http_listen)
         .await
         .with_context(|| format!("could not bind HTTP listener {}", config.http_listen))?;
@@ -48,6 +51,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     );
     let shutdown = CancellationToken::new();
     let mut socket_task = tokio::spawn(socket.serve(local_requests, shutdown.clone()));
+    let mut control_task = tokio::spawn(control_socket.serve(pairing.clone(), shutdown.clone()));
     let router = web::router(
         SessionConfig {
             broker: broker.clone(),
@@ -73,6 +77,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             shutdown.cancel();
             broker.shutdown().await;
             web_task.await.context("HTTP/WebSocket task failed")??;
+            control_task.await.context("control socket task failed")??;
             broker_task.await.context("request broker task failed")?;
             return Ok(());
         }
@@ -83,6 +88,18 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             socket_task
                 .await
                 .context("SSH-agent socket task failed")??;
+            control_task.await.context("control socket task failed")??;
+            broker_task.await.context("request broker task failed")?;
+            return Ok(());
+        }
+        result = &mut control_task => {
+            result.context("control socket task failed")??;
+            shutdown.cancel();
+            broker.shutdown().await;
+            socket_task
+                .await
+                .context("SSH-agent socket task failed")??;
+            web_task.await.context("HTTP/WebSocket task failed")??;
             broker_task.await.context("request broker task failed")?;
             return Ok(());
         }
@@ -92,6 +109,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
                 .await
                 .context("SSH-agent socket task failed")??;
             web_task.await.context("HTTP/WebSocket task failed")??;
+            control_task.await.context("control socket task failed")??;
             result.context("request broker task failed")?;
             return Err(anyhow::anyhow!("request broker stopped unexpectedly"));
         }
@@ -105,6 +123,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         .await
         .context("SSH-agent socket task failed")??;
     web_task.await.context("HTTP/WebSocket task failed")??;
+    control_task.await.context("control socket task failed")??;
     broker_task.await.context("request broker task failed")?;
     Ok(())
 }

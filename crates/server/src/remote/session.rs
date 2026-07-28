@@ -34,6 +34,7 @@ pub struct SessionConfig {
 
 /// Authenticate one WebSocket and adapt it to the broker remote interface.
 pub async fn serve(mut socket: WebSocket, config: SessionConfig) {
+    let revocations = config.pairing.subscribe_revocations();
     let Some(message) = receive_client(&mut socket).await else {
         return;
     };
@@ -83,7 +84,7 @@ pub async fn serve(mut socket: WebSocket, config: SessionConfig) {
         return;
     }
 
-    run_authenticated(socket, connection, &config).await;
+    run_authenticated(socket, connection, revocations, &config).await;
 }
 
 async fn send_rejected(socket: &mut WebSocket) {
@@ -130,6 +131,7 @@ fn handshake_response(
 async fn run_authenticated(
     socket: WebSocket,
     mut connection: RemoteConnection,
+    mut revocations: tokio::sync::watch::Receiver<u64>,
     config: &SessionConfig,
 ) {
     let session_id = connection.session_id;
@@ -179,6 +181,7 @@ async fn run_authenticated(
 
                 awaiting_pong = true;
             }
+            _ = revocations.changed() => break,
             () = config.shutdown.cancelled() => break,
         }
     }

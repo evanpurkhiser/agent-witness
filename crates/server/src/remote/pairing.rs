@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use thiserror::Error;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, watch};
 use uuid::Uuid;
 
 const CREDENTIAL_LENGTH: usize = 32;
@@ -95,6 +95,7 @@ impl PairingStore for MemoryPairingStore {
 pub struct PairingService {
     store: Arc<dyn PairingStore>,
     state: Arc<Mutex<PairingState>>,
+    revocations: watch::Sender<u64>,
 }
 
 impl PairingService {
@@ -109,10 +110,31 @@ impl PairingService {
             }
         };
 
+        let (revocations, _) = watch::channel(0);
+
         Ok(Self {
             store,
             state: Arc::new(Mutex::new(state)),
+            revocations,
         })
+    }
+
+    /// Persist an unpaired state and revoke the active remote session.
+    pub async fn clear(&self) -> anyhow::Result<bool> {
+        let mut state = self.state.lock().await;
+        if state.client.is_none() {
+            return Ok(false);
+        }
+
+        let next = PairingState {
+            server_id: state.server_id,
+            client: None,
+        };
+        self.store.save(&next).await?;
+        *state = next;
+        self.revocations.send_modify(|generation| *generation += 1);
+
+        Ok(true)
     }
 }
 
@@ -182,6 +204,10 @@ impl PairingAuthority for PairingService {
             })
         })
     }
+
+    fn subscribe_revocations(&self) -> watch::Receiver<u64> {
+        self.revocations.subscribe()
+    }
 }
 
 fn now() -> u64 {
@@ -241,6 +267,8 @@ pub trait PairingAuthority: Send + Sync {
     fn pair<'a>(&'a self, label: String) -> AuthorizationFuture<'a>;
 
     fn authenticate<'a>(&'a self, client_id: Uuid, credential: Bytes) -> AuthorizationFuture<'a>;
+
+    fn subscribe_revocations(&self) -> watch::Receiver<u64>;
 }
 
 /// Asynchronous pairing decision returned by a [`PairingAuthority`].
@@ -310,5 +338,29 @@ mod tests {
         };
 
         assert_eq!(authenticated_server_id, server_id);
+    }
+
+    #[tokio::test]
+    async fn clearing_pairing_persists_and_revokes_the_session() {
+        let store = Arc::new(MemoryPairingStore::new());
+        let pairing = PairingService::open(store.clone()).await.unwrap();
+        let mut revocations = pairing.subscribe_revocations();
+        pairing.pair("iPhone".into()).await.unwrap();
+
+        assert!(pairing.clear().await.unwrap());
+        revocations.changed().await.unwrap();
+        assert!(!pairing.clear().await.unwrap());
+
+        let reopened = PairingService::open(store).await.unwrap();
+        assert!(matches!(
+            reopened
+                .authenticate(
+                    uuid::Uuid::new_v4(),
+                    bytes::Bytes::from_static(b"credential")
+                )
+                .await,
+            Err(AuthorizationError::NotPaired)
+        ));
+        assert!(reopened.pair("replacement".into()).await.is_ok());
     }
 }

@@ -31,6 +31,7 @@ export interface PairingRecord {
 export interface PairingStore {
   loadPairing(endpoint: string): Promise<PairingRecord | null>;
   savePairing(pairing: PairingRecord): Promise<void>;
+  deletePairing(endpoint: string): Promise<void>;
 }
 
 // REVIEW: Think we could make this discriminate based on status? then we wouldn't need the nulls right?
@@ -205,6 +206,12 @@ export class RemoteSession {
     if (wasConnected) {
       this.#onDisconnect();
     }
+  }
+
+  async forgetPairing(endpoint: string): Promise<void> {
+    const normalized = new URL(endpoint).href;
+    this.disconnect();
+    await this.#pairingStore.deletePairing(normalized);
   }
 
   setReady(ready: boolean): void {

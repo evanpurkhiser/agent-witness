@@ -12,6 +12,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
 const DEFAULT_UNIX_SOCKET: &str = "/run/agent-witness/agent.sock";
+const DEFAULT_CONTROL_SOCKET: &str = "/run/agent-witness/control.sock";
 
 /// Operator-controlled daemon configuration.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -19,6 +20,13 @@ const DEFAULT_UNIX_SOCKET: &str = "/run/agent-witness/agent.sock";
 pub struct Config {
     /// Optional durable pairing state file.
     pub state_path: Option<PathBuf>,
+
+    /// Path used by local administrative commands.
+    pub control_socket: PathBuf,
+
+    /// Unix permission bits applied to the control socket.
+    #[serde(deserialize_with = "deserialize_mode")]
+    pub control_socket_mode: u32,
 
     /// Path exposed to local processes as `SSH_AUTH_SOCK`.
     pub unix_socket: PathBuf,
@@ -48,6 +56,8 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             state_path: None,
+            control_socket: PathBuf::from(DEFAULT_CONTROL_SOCKET),
+            control_socket_mode: 0o600,
             unix_socket: PathBuf::from(DEFAULT_UNIX_SOCKET),
             socket_mode: 0o600,
             http_listen: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9345),
@@ -62,6 +72,9 @@ impl Default for Config {
 /// CLI values layered over the defaults and optional configuration file.
 #[derive(Default)]
 pub struct ConfigOverrides {
+    /// Explicit control socket path supplied on the command line.
+    pub control_socket: Option<PathBuf>,
+
     /// Explicit SSH-agent socket path supplied on the command line.
     pub unix_socket: Option<PathBuf>,
 
@@ -80,6 +93,9 @@ impl Config {
         if let Some(path) = path {
             figment = figment.merge(Toml::file(path));
         }
+        if let Some(control_socket) = overrides.control_socket {
+            figment = figment.merge(Serialized::default("control_socket", control_socket));
+        }
         if let Some(unix_socket) = overrides.unix_socket {
             figment = figment.merge(Serialized::default("unix_socket", unix_socket));
         }
@@ -95,6 +111,12 @@ impl Config {
 
     /// Reject values that cannot be represented safely by the runtime.
     pub fn validate(&self) -> Result<(), ConfigError> {
+        if self.control_socket_mode & !0o777 != 0 {
+            return Err(ConfigError::Invalid(
+                "control_socket_mode must contain only Unix permission bits".into(),
+            ));
+        }
+
         if self.socket_mode & !0o777 != 0 {
             return Err(ConfigError::Invalid(
                 "socket_mode must contain only Unix permission bits".into(),
@@ -188,6 +210,8 @@ mod tests {
             &path,
             r#"
                 state_path = "/tmp/agent-witness-state.json"
+                control_socket = "/tmp/agent-witness-control.sock"
+                control_socket_mode = "0640"
                 unix_socket = "/tmp/agent-witness.sock"
                 socket_mode = "0660"
                 request_timeout = "15s"
@@ -202,6 +226,11 @@ mod tests {
             config.state_path,
             Some(PathBuf::from("/tmp/agent-witness-state.json"))
         );
+        assert_eq!(
+            config.control_socket,
+            PathBuf::from("/tmp/agent-witness-control.sock")
+        );
+        assert_eq!(config.control_socket_mode, 0o640);
         assert_eq!(config.socket_mode, 0o660);
         assert_eq!(config.request_timeout, Duration::from_secs(15));
         assert_eq!(config.max_agent_packet_size, 256 * 1024);
@@ -219,6 +248,7 @@ mod tests {
         let config = Config::extract(
             Some(&path),
             ConfigOverrides {
+                control_socket: Some(PathBuf::from("/tmp/control.sock")),
                 request_timeout: Some(Duration::from_secs(2)),
                 ..ConfigOverrides::default()
             },
@@ -226,6 +256,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.request_timeout, Duration::from_secs(2));
+        assert_eq!(config.control_socket, PathBuf::from("/tmp/control.sock"));
     }
 
     #[test]

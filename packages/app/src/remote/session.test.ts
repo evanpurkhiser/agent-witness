@@ -72,6 +72,18 @@ describe('RemoteSession', () => {
     expect(sentMessages(socket).at(-1)).toEqual({type: 'agent_ready'});
   });
 
+  it('forgets a rejected server pairing without changing other state', async () => {
+    const store = new MemoryPairingStore(pairing());
+    const {session, socket} = await connectSession({store});
+    socket.receive({type: 'rejected'});
+    await settle();
+
+    await session.forgetPairing(ENDPOINT);
+
+    expect(await store.loadPairing(ENDPOINT)).toBeNull();
+    expect(session.snapshot().status).toBe('disconnected');
+  });
+
   it('buffers requests while locked and drains them after unlock', async () => {
     const store = new MemoryPairingStore(pairing());
     const handleRequest = vi.fn(() => Promise.resolve(bytes(0, 0, 0, 1, 12)));
@@ -232,6 +244,13 @@ class MemoryPairingStore implements PairingStore {
 
   savePairing(pairing: PairingRecord): Promise<void> {
     this.#pairing = pairing;
+    return Promise.resolve();
+  }
+
+  deletePairing(endpoint: string): Promise<void> {
+    if (this.#pairing?.endpoint === endpoint) {
+      this.#pairing = null;
+    }
     return Promise.resolve();
   }
 }

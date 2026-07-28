@@ -5,26 +5,30 @@ that never leave your devices.
 
 ## Implementation status
 
-This spec describes the whole system; much of it is still design. The
-security-sensitive client core is built and unit-tested (Vitest), and the
-initial Rust server request path is implemented. The browser's live session
-wiring and the server's durable operational services remain.
+This spec describes the whole system; some operational services remain design.
+The security-sensitive client core, live browser session, and initial durable
+Rust server request path are implemented and unit-tested.
 
 **Implemented (client vault core):** SSH key parsing (`openssh-key-v1`), SSH
 wire encoding, public-key fingerprints, the WebCrypto envelope (passkey → master
 key → per-key wrapping), IndexedDB storage, the typestate vault API, ssh-agent
 message framing and dispatch, and vault-backed signing.
 
-**Implemented (server phase 1):** the queue-first request broker and
+**Implemented (server):** the queue-first request broker and
 connection/capacity gates, request deadlines and remote-attempt correlation,
 local cancellation through remote `CancelRequest`, daemon configuration and
 lifecycle, a bounded permission-restricted Unix SSH-agent socket, and the
-MessagePack WebSocket adapter with process-local first-client pairing.
+MessagePack WebSocket adapter. First-client pairing supports both process-local
+memory and atomically replaced persistent state, and the local control socket
+can clear pairing and revoke an active remote session.
 
-**Not yet implemented (still as designed below):** the dedicated worker's live
-session and WebSocket control API, signing over the wire, the service worker
-and Web Push, server control IPC, persistent pairing, push delivery, and
-frontend asset serving.
+**Implemented (live client):** the dedicated worker's WebSocket session,
+pairing credential storage, locked request buffering, cancellation, signing
+over the wire, and embedded production frontend assets.
+
+**Not yet implemented (still as designed below):** the service worker and Web
+Push, push-subscription registration and delivery, and the control socket's
+status and statistics commands.
 
 Note: there is **no Rust/WASM on the client**. A spike proved a hand-rolled
 ssh-agent in TypeScript authenticates against a real OpenSSH `sshd`, and Ed25519
