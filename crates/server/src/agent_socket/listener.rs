@@ -1,7 +1,7 @@
 use std::{io, path::Path};
 
 use bytes::Bytes;
-use futures_util::StreamExt;
+use futures_util::{FutureExt, StreamExt, future::BoxFuture, stream::FuturesOrdered};
 use tokio::{
     io::AsyncWriteExt,
     net::{UnixListener, UnixStream},
@@ -16,6 +16,9 @@ use crate::packet::{PacketRequest, RequestError};
 use super::AgentSocketError;
 
 const AGENT_FAILURE_FRAME: &[u8] = &[0, 0, 0, 1, 5];
+
+/// Bound per-connection work independently from the shared processor channel.
+const MAX_PIPELINED_REQUESTS: usize = 8;
 
 /// Accept connections until shutdown and supervise their packet-processing tasks.
 pub(super) async fn serve(
@@ -53,7 +56,7 @@ pub(super) async fn serve(
     Ok(())
 }
 
-/// Forward bounded packets sequentially between one Unix client and the processor.
+/// Forward bounded packets while preserving response order for one Unix client.
 async fn handle_connection(
     stream: UnixStream,
     requests: mpsc::Sender<PacketRequest>,
@@ -69,31 +72,55 @@ async fn handle_connection(
         .num_skip(0)
         .max_frame_length(max_packet_size + 4)
         .new_read(reader);
+    let mut responses = FuturesOrdered::<BoxFuture<'static, Result<Bytes, RequestError>>>::new();
 
-    while let Some(frame) = frames.next().await {
-        let response = match frame {
-            Ok(packet) => submit(&requests, packet.freeze(), cancellation.child_token())
-                .await
-                .unwrap_or_else(|error| {
+    loop {
+        tokio::select! {
+            frame = frames.next() => {
+                let Some(frame) = frame else {
+                    return Ok(());
+                };
+                let packet = match frame {
+                    Ok(packet) => packet.freeze(),
+                    Err(error) => {
+                        warn!(%error, "rejecting malformed or oversized SSH-agent packet");
+                        if responses.is_empty() {
+                            writer.write_all(AGENT_FAILURE_FRAME).await?;
+                        }
+                        return Ok(());
+                    }
+                };
+                if responses.len() >= MAX_PIPELINED_REQUESTS {
+                    warn!("rejecting excessive pipelined SSH-agent requests");
+                    return Ok(());
+                }
+
+                responses.push_back(
+                    submit(
+                        requests.clone(),
+                        packet,
+                        cancellation.child_token(),
+                    )
+                    .boxed(),
+                );
+            }
+            response = responses.next(), if !responses.is_empty() => {
+                let response = response
+                    .expect("non-empty response queue ended")
+                    .unwrap_or_else(|error| {
                     debug!(%error, "SSH-agent request failed");
                     Bytes::from_static(AGENT_FAILURE_FRAME)
-                }),
-            Err(error) => {
-                warn!(%error, "rejecting malformed or oversized SSH-agent packet");
-                writer.write_all(AGENT_FAILURE_FRAME).await?;
-                return Ok(());
+                });
+
+                writer.write_all(&response).await?;
             }
-        };
-
-        writer.write_all(&response).await?;
+        }
     }
-
-    Ok(())
 }
 
 /// Submit one complete packet and await its processor response.
 async fn submit(
-    requests: &mpsc::Sender<PacketRequest>,
+    requests: mpsc::Sender<PacketRequest>,
     packet: Bytes,
     cancellation: CancellationToken,
 ) -> Result<Bytes, RequestError> {
@@ -118,6 +145,7 @@ mod tests {
         io::{AsyncReadExt, AsyncWriteExt},
         net::UnixStream,
         sync::mpsc,
+        time::timeout,
     };
     use tokio_util::sync::CancellationToken;
 
@@ -173,6 +201,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cancels_requests_when_the_local_client_disconnects() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("agent.sock");
+        let socket = AgentSocket::bind(path.clone(), 0o600, 1024).await.unwrap();
+        let (requests, mut incoming) = mpsc::channel(1);
+        let shutdown = CancellationToken::new();
+        let server_task = tokio::spawn(socket.serve(requests, shutdown.clone()));
+
+        let mut client = UnixStream::connect(&path).await.unwrap();
+        client.write_all(&[0, 0, 0, 1, 11]).await.unwrap();
+        let request = incoming.recv().await.unwrap();
+        drop(client);
+
+        timeout(
+            std::time::Duration::from_secs(1),
+            request.cancellation.cancelled(),
+        )
+        .await
+        .unwrap();
+
+        shutdown.cancel();
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
     async fn forwards_complete_frames_without_interpreting_them() {
         let directory = tempdir().unwrap();
         let path = directory.path().join("agent.sock");
@@ -198,6 +251,69 @@ mod tests {
         client.read_exact(&mut received).await.unwrap();
         assert_eq!(received, response);
         processor_task.await.unwrap();
+
+        shutdown.cancel();
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn preserves_response_order_for_pipelined_requests() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("agent.sock");
+        let socket = AgentSocket::bind(path.clone(), 0o600, 1024).await.unwrap();
+        let (requests, mut incoming) = mpsc::channel(2);
+        let shutdown = CancellationToken::new();
+        let server_task = tokio::spawn(socket.serve(requests, shutdown.clone()));
+        let mut client = UnixStream::connect(&path).await.unwrap();
+
+        client.write_all(&[0, 0, 0, 1, 11]).await.unwrap();
+        client.write_all(&[0, 0, 0, 1, 12]).await.unwrap();
+        let first = incoming.recv().await.unwrap();
+        let second = incoming.recv().await.unwrap();
+        second
+            .response
+            .send(Ok(Bytes::from_static(&[0, 0, 0, 1, 22])))
+            .unwrap();
+        first
+            .response
+            .send(Ok(Bytes::from_static(&[0, 0, 0, 1, 21])))
+            .unwrap();
+
+        let mut responses = [0; 10];
+        client.read_exact(&mut responses).await.unwrap();
+        assert_eq!(responses, [0, 0, 0, 1, 21, 0, 0, 0, 1, 22],);
+
+        shutdown.cancel();
+        server_task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn malformed_later_frame_cannot_overtake_a_pending_response() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("agent.sock");
+        let socket = AgentSocket::bind(path.clone(), 0o600, 4).await.unwrap();
+        let (requests, mut incoming) = mpsc::channel(1);
+        let shutdown = CancellationToken::new();
+        let server_task = tokio::spawn(socket.serve(requests, shutdown.clone()));
+        let mut client = UnixStream::connect(&path).await.unwrap();
+
+        client.write_all(&[0, 0, 0, 1, 11]).await.unwrap();
+        let request = incoming.recv().await.unwrap();
+        client
+            .write_all(&[0, 0, 0, 9, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+            .await
+            .unwrap();
+
+        let mut received = Vec::new();
+        timeout(
+            std::time::Duration::from_secs(1),
+            client.read_to_end(&mut received),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(received.is_empty());
+        assert!(request.cancellation.is_cancelled());
 
         shutdown.cancel();
         server_task.await.unwrap().unwrap();
