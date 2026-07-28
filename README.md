@@ -9,3 +9,18 @@ sign, it wakes your phone with a push notification to authorize the request.
 
 > [!WARNING]
 > Early work in progress.
+
+## Production build
+
+Install the pinned toolchain and JavaScript dependencies, then build the
+frontend and release server in the required order:
+
+```console
+mise install
+pnpm install --frozen-lockfile
+pnpm build:production
+```
+
+The resulting `target/release/agent-witness` binary contains the complete Vite
+application and does not need `packages/app/dist` at runtime. Production
+deployments should terminate TLS in front of its HTTP listener.

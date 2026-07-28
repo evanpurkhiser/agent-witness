@@ -528,6 +528,20 @@ rust-embed = "8"
 Packaging should build the frontend explicitly before compiling the release
 server. Avoid hiding pnpm invocation inside `build.rs`.
 
+The `embedded-ui` Cargo feature adds the built Vite output to the server binary.
+It remains opt-in so normal Rust development does not require a populated
+frontend `dist` directory. The root production build command owns the required
+ordering:
+
+```console
+pnpm install --frozen-lockfile
+pnpm build:production
+```
+
+This builds `packages/app/dist` before running the locked release build with
+`embedded-ui`. Missing frontend output must fail the release build rather than
+silently producing a server without its browser application.
+
 ### Web Push
 
 The provisional choice for the push increment is:

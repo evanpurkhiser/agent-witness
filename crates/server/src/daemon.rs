@@ -53,7 +53,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             .await
     });
 
-    info!(address = %config.http_listen, "remote WebSocket listener ready");
+    info!(address = %config.http_listen, "HTTP/WebSocket listener ready");
 
     tokio::select! {
         result = wait_for_shutdown() => result?,

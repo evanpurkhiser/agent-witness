@@ -6,9 +6,11 @@
   "license": "MIT",
   "author": "Evan Purkhiser",
   "scripts": {
+    "build:production": "pnpm --filter app build && cargo build --locked --release --features embedded-ui",
     "lint": "oxlint .",
     "format": "oxfmt .",
-    "format:check": "oxfmt --check ."
+    "format:check": "oxfmt --check .",
+    "test": "pnpm --filter app test"
   },
   "devDependencies": {
     "@evanpurkhiser/oxc-config": "^0.8.0",

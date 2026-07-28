@@ -9,14 +9,22 @@ use axum::{
 
 use crate::remote::{SessionConfig, serve};
 
+#[cfg(feature = "embedded-ui")]
+mod assets;
+
 /// Build the HTTP router without binding it to a listener.
 pub fn router(session: SessionConfig, max_message_size: usize) -> Router {
-    Router::new()
-        .route("/api/agent", get(upgrade_agent))
-        .with_state(WebState {
-            session,
-            max_message_size,
-        })
+    let router = Router::new().route("/api/agent", get(upgrade_agent));
+
+    #[cfg(feature = "embedded-ui")]
+    let router = router
+        .route("/", get(assets::index))
+        .route("/assets/{*path}", get(assets::asset));
+
+    router.with_state(WebState {
+        session,
+        max_message_size,
+    })
 }
 
 #[derive(Clone)]

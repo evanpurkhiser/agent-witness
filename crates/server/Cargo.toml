@@ -6,6 +6,9 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
+[features]
+embedded-ui = ["dep:mime_guess", "dep:rust-embed"]
+
 [dependencies]
 anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }
@@ -16,7 +19,9 @@ futures-util = { version = "0.3", features = ["sink"] }
 getrandom = "0.4"
 humantime = "2"
 humantime-serde = "1"
+mime_guess = { version = "2", optional = true }
 rmp-serde = "1"
+rust-embed = { version = "8", optional = true }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.11"
 subtle = "2"
@@ -38,6 +43,7 @@ uuid = { version = "1", features = ["serde", "v4"] }
 [dev-dependencies]
 tempfile = "3"
 tokio-tungstenite = "0.30"
+tower = { version = "0.5", features = ["util"] }
 
 [[bin]]
 name = "agent-witness"
