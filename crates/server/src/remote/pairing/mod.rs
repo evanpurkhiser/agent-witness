@@ -1,7 +1,7 @@
 use std::{
     future::Future,
     pin::Pin,
-    sync::{Arc, Mutex as StdMutex},
+    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -16,8 +16,10 @@ use uuid::Uuid;
 const CREDENTIAL_LENGTH: usize = 32;
 
 mod file;
+mod memory;
 
 pub use file::FilePairingStore;
+pub use memory::MemoryPairingStore;
 
 /// Complete pairing state owned by a [`PairingStore`].
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -57,37 +59,6 @@ pub trait PairingStore: Send + Sync {
 
     /// Replace the current state.
     fn save<'a>(&'a self, state: &'a PairingState) -> PairingStoreFuture<'a, ()>;
-}
-
-/// Process-local pairing storage for tests and explicitly ephemeral servers.
-#[derive(Default)]
-pub struct MemoryPairingStore {
-    state: StdMutex<Option<PairingState>>,
-}
-
-impl MemoryPairingStore {
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-
-impl PairingStore for MemoryPairingStore {
-    fn load(&self) -> PairingStoreFuture<'_, Option<PairingState>> {
-        Box::pin(async move {
-            Ok(self
-                .state
-                .lock()
-                .expect("pairing store mutex poisoned")
-                .clone())
-        })
-    }
-
-    fn save<'a>(&'a self, state: &'a PairingState) -> PairingStoreFuture<'a, ()> {
-        Box::pin(async move {
-            *self.state.lock().expect("pairing store mutex poisoned") = Some(state.clone());
-            Ok(())
-        })
-    }
 }
 
 /// First-client pairing and authentication policy shared by all stores.
