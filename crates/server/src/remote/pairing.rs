@@ -1,42 +1,119 @@
 use std::{
     future::Future,
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex as StdMutex},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use bytes::Bytes;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use thiserror::Error;
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 const CREDENTIAL_LENGTH: usize = 32;
 
-/// Process-local first-client pairing used until durable state is implemented.
-///
-/// This type deliberately lives behind the session adapter boundary. Replacing
-/// it with persistent pairing does not change WebSocket or broker behavior.
-#[derive(Clone)]
-pub struct EphemeralPairing {
-    server_id: Uuid,
-    state: Arc<Mutex<Option<PairedClient>>>,
+/// Complete pairing state owned by a [`PairingStore`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PairingState {
+    pub(crate) server_id: Uuid,
+    pub(crate) client: Option<PairedClient>,
 }
 
-impl EphemeralPairing {
-    /// Create an unpaired authority with a new process-local server identity.
-    pub fn new() -> Self {
+impl PairingState {
+    fn unpaired() -> Self {
         Self {
             server_id: Uuid::new_v4(),
-            state: Arc::new(Mutex::new(None)),
+            client: None,
         }
     }
 }
 
-impl PairingAuthority for EphemeralPairing {
+/// The single client authorized to connect to this server.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PairedClient {
+    pub(crate) client_id: Uuid,
+    pub(crate) credential_hash: [u8; 32],
+    pub(crate) label: String,
+    pub(crate) created_at: u64,
+    pub(crate) last_seen_at: Option<u64>,
+}
+
+/// Asynchronous operation performed by a pairing store.
+pub type PairingStoreFuture<'a, T> = Pin<Box<dyn Future<Output = anyhow::Result<T>> + Send + 'a>>;
+
+/// Storage boundary used by pairing policy.
+pub trait PairingStore: Send + Sync {
+    /// Load the current state, returning `None` for a new store.
+    fn load(&self) -> PairingStoreFuture<'_, Option<PairingState>>;
+
+    /// Replace the current state.
+    fn save<'a>(&'a self, state: &'a PairingState) -> PairingStoreFuture<'a, ()>;
+}
+
+/// Process-local pairing storage for tests and explicitly ephemeral servers.
+#[derive(Default)]
+pub struct MemoryPairingStore {
+    state: StdMutex<Option<PairingState>>,
+}
+
+impl MemoryPairingStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl PairingStore for MemoryPairingStore {
+    fn load(&self) -> PairingStoreFuture<'_, Option<PairingState>> {
+        Box::pin(async move {
+            Ok(self
+                .state
+                .lock()
+                .expect("pairing store mutex poisoned")
+                .clone())
+        })
+    }
+
+    fn save<'a>(&'a self, state: &'a PairingState) -> PairingStoreFuture<'a, ()> {
+        Box::pin(async move {
+            *self.state.lock().expect("pairing store mutex poisoned") = Some(state.clone());
+            Ok(())
+        })
+    }
+}
+
+/// First-client pairing and authentication policy shared by all stores.
+#[derive(Clone)]
+pub struct PairingService {
+    store: Arc<dyn PairingStore>,
+    state: Arc<Mutex<PairingState>>,
+}
+
+impl PairingService {
+    /// Load existing state or initialize and save a new server identity.
+    pub async fn open(store: Arc<dyn PairingStore>) -> anyhow::Result<Self> {
+        let state = match store.load().await? {
+            Some(state) => state,
+            None => {
+                let state = PairingState::unpaired();
+                store.save(&state).await?;
+                state
+            }
+        };
+
+        Ok(Self {
+            store,
+            state: Arc::new(Mutex::new(state)),
+        })
+    }
+}
+
+impl PairingAuthority for PairingService {
     fn pair<'a>(&'a self, label: String) -> AuthorizationFuture<'a> {
         Box::pin(async move {
-            let mut state = self.state.lock().expect("pairing mutex poisoned");
-            if state.is_some() {
+            let mut state = self.state.lock().await;
+            if state.client.is_some() {
                 return Err(AuthorizationError::AlreadyPaired);
             }
 
@@ -44,14 +121,24 @@ impl PairingAuthority for EphemeralPairing {
             let mut credential = vec![0; CREDENTIAL_LENGTH];
             getrandom::fill(&mut credential)
                 .map_err(|_| AuthorizationError::CredentialGeneration)?;
-            *state = Some(PairedClient {
-                client_id,
-                credential_hash: Sha256::digest(&credential).into(),
-                label,
-            });
+            let next = PairingState {
+                server_id: state.server_id,
+                client: Some(PairedClient {
+                    client_id,
+                    credential_hash: Sha256::digest(&credential).into(),
+                    label,
+                    created_at: now(),
+                    last_seen_at: None,
+                }),
+            };
+            self.store
+                .save(&next)
+                .await
+                .map_err(AuthorizationError::Storage)?;
+            *state = next;
 
             Ok(Authorization::Paired {
-                server_id: self.server_id,
+                server_id: state.server_id,
                 client_id,
                 credential: Bytes::from(credential),
             })
@@ -60,8 +147,8 @@ impl PairingAuthority for EphemeralPairing {
 
     fn authenticate<'a>(&'a self, client_id: Uuid, credential: Bytes) -> AuthorizationFuture<'a> {
         Box::pin(async move {
-            let state = self.state.lock().expect("pairing mutex poisoned");
-            let Some(client) = state.as_ref() else {
+            let mut state = self.state.lock().await;
+            let Some(client) = state.client.as_ref() else {
                 return Err(AuthorizationError::NotPaired);
             };
             let credential_hash: [u8; 32] = Sha256::digest(&credential).into();
@@ -72,31 +159,36 @@ impl PairingAuthority for EphemeralPairing {
                 return Err(AuthorizationError::Rejected);
             }
 
+            let mut next = state.clone();
+            next.client
+                .as_mut()
+                .expect("paired client disappeared")
+                .last_seen_at = Some(now());
+            self.store
+                .save(&next)
+                .await
+                .map_err(AuthorizationError::Storage)?;
+            *state = next;
+
             Ok(Authorization::Authenticated {
-                server_id: self.server_id,
+                server_id: state.server_id,
             })
         })
     }
 }
 
-impl Default for EphemeralPairing {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-struct PairedClient {
-    client_id: Uuid,
-    credential_hash: [u8; 32],
-    #[allow(dead_code)]
-    label: String,
+fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 /// Successful authorization data needed to establish a remote session.
 pub enum Authorization {
     /// The first client claimed the server and must retain its new credential.
     Paired {
-        /// Stable server identity for this process.
+        /// Stable server identity for this store.
         server_id: Uuid,
 
         /// Identity assigned to the paired client.
@@ -108,7 +200,7 @@ pub enum Authorization {
 
     /// An existing client presented its assigned ID and credential.
     Authenticated {
-        /// Stable server identity for this process.
+        /// Stable server identity for this store.
         server_id: Uuid,
     },
 }
@@ -131,12 +223,13 @@ pub enum AuthorizationError {
     /// The operating system could not provide a random credential.
     #[error("could not generate a client credential")]
     CredentialGeneration,
+
+    /// The pairing state could not be saved.
+    #[error("could not save pairing state")]
+    Storage(#[source] anyhow::Error),
 }
 
 /// Pairing boundary consumed by the WebSocket adapter.
-///
-/// Durable pairing can implement this interface without changing session
-/// framing or broker translation.
 pub trait PairingAuthority: Send + Sync {
     fn pair<'a>(&'a self, label: String) -> AuthorizationFuture<'a>;
 
@@ -149,11 +242,17 @@ pub type AuthorizationFuture<'a> =
 
 #[cfg(test)]
 mod tests {
-    use super::{Authorization, AuthorizationError, EphemeralPairing, PairingAuthority};
+    use std::sync::Arc;
+
+    use super::{
+        Authorization, AuthorizationError, MemoryPairingStore, PairingAuthority, PairingService,
+    };
 
     #[tokio::test]
     async fn first_client_pairs_and_can_authenticate_again() {
-        let pairing = EphemeralPairing::new();
+        let pairing = PairingService::open(Arc::new(MemoryPairingStore::new()))
+            .await
+            .unwrap();
         let Authorization::Paired {
             client_id,
             credential,
@@ -171,12 +270,38 @@ mod tests {
 
     #[tokio::test]
     async fn pairing_slot_can_only_be_claimed_once() {
-        let pairing = EphemeralPairing::new();
+        let pairing = PairingService::open(Arc::new(MemoryPairingStore::new()))
+            .await
+            .unwrap();
         pairing.pair("first".into()).await.unwrap();
 
         assert!(matches!(
             pairing.pair("second".into()).await,
             Err(AuthorizationError::AlreadyPaired)
         ));
+    }
+
+    #[tokio::test]
+    async fn state_survives_reopening_the_service() {
+        let store = Arc::new(MemoryPairingStore::new());
+        let first = PairingService::open(store.clone()).await.unwrap();
+        let Authorization::Paired {
+            server_id,
+            client_id,
+            credential,
+        } = first.pair("iPhone".into()).await.unwrap()
+        else {
+            panic!("expected a new pairing")
+        };
+
+        let reopened = PairingService::open(store).await.unwrap();
+        let Authorization::Authenticated {
+            server_id: authenticated_server_id,
+        } = reopened.authenticate(client_id, credential).await.unwrap()
+        else {
+            panic!("expected authentication")
+        };
+
+        assert_eq!(authenticated_server_id, server_id);
     }
 }

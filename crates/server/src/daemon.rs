@@ -13,7 +13,7 @@ use crate::{
     agent_socket::AgentSocket,
     broker::{BrokerConfig, BrokerHandle},
     config::Config,
-    remote::{EphemeralPairing, SessionConfig, protocol::MAX_MESSAGE_OVERHEAD},
+    remote::{MemoryPairingStore, PairingService, SessionConfig, protocol::MAX_MESSAGE_OVERHEAD},
     web,
 };
 
@@ -37,10 +37,11 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     );
     let shutdown = CancellationToken::new();
     let mut socket_task = tokio::spawn(socket.serve(local_requests, shutdown.clone()));
+    let pairing = Arc::new(PairingService::open(Arc::new(MemoryPairingStore::new())).await?);
     let router = web::router(
         SessionConfig {
             broker: broker.clone(),
-            pairing: Arc::new(EphemeralPairing::new()),
+            pairing,
             remote_capacity: config.remote_capacity,
             shutdown: shutdown.clone(),
         },

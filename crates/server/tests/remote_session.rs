@@ -3,7 +3,7 @@ use std::{sync::Arc, time::Duration};
 use agent_witness_server::{
     broker::{BrokerConfig, BrokerHandle},
     packet::{PacketRequest, RequestError},
-    remote::{EphemeralPairing, SessionConfig},
+    remote::{MemoryPairingStore, PairingService, SessionConfig},
     web,
 };
 use bytes::Bytes;
@@ -28,10 +28,13 @@ async fn websocket_adapts_a_remote_worker_to_the_broker() {
         incoming_requests,
     );
     let shutdown = CancellationToken::new();
+    let pairing = PairingService::open(Arc::new(MemoryPairingStore::new()))
+        .await
+        .unwrap();
     let app = web::router(
         SessionConfig {
             broker: broker.clone(),
-            pairing: Arc::new(EphemeralPairing::new()),
+            pairing: Arc::new(pairing),
             remote_capacity: 1,
             shutdown: shutdown.clone(),
         },

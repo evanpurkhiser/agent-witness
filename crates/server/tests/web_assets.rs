@@ -4,7 +4,7 @@ use std::{sync::Arc, time::Duration};
 
 use agent_witness_server::{
     broker::{BrokerConfig, BrokerHandle},
-    remote::{EphemeralPairing, SessionConfig},
+    remote::{MemoryPairingStore, PairingService, SessionConfig},
     web,
 };
 use axum::{
@@ -28,10 +28,13 @@ async fn serves_the_embedded_application_with_cache_validation() {
         },
         incoming_requests,
     );
+    let pairing = PairingService::open(Arc::new(MemoryPairingStore::new()))
+        .await
+        .unwrap();
     let app = web::router(
         SessionConfig {
             broker: broker.clone(),
-            pairing: Arc::new(EphemeralPairing::new()),
+            pairing: Arc::new(pairing),
             remote_capacity: 1,
             shutdown: CancellationToken::new(),
         },
