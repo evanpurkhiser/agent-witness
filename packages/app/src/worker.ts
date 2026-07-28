@@ -4,76 +4,152 @@
 
 import * as Comlink from 'comlink';
 
+import {RemoteSession} from 'app/remote/session';
+import {handleAgentRequest, readFrame} from 'app/ssh/agent';
 import type {Bytes} from 'app/utils/bytes';
-import {openVaultStore} from 'app/vault/storage';
+import {openVaultStore, type VaultStore} from 'app/vault/storage';
 import {
   assertVaultStatus,
   type CreateVaultParams,
   openVault,
   type VaultState,
 } from 'app/vault/vault';
-import {toSnapshot, type VaultSnapshot, type WorkerApi} from 'app/worker-api';
+
+import {
+  type StateListener,
+  toSnapshot,
+  type WorkerApi,
+  type WorkerSnapshot,
+} from './worker-api';
 
 /**
- * Holds the current vault state and dispatches page commands to the valid
- * transition for that state, rejecting invalid ones.
+ * Owns the vault and remote agent session, exposing only display-safe snapshots
+ * and control operations to the page.
  */
-class VaultSession implements WorkerApi {
+class WorkerSession implements WorkerApi {
+  #store: VaultStore | null = null;
   #state: VaultState | null = null;
+  #listener: StateListener | null = null;
+  readonly #remote = new RemoteSession({
+    pairingStore: {
+      loadPairing: endpoint =>
+        this.#currentStore().then(store => store.loadPairing(endpoint)),
+      savePairing: pairing =>
+        this.#currentStore().then(store => store.savePairing(pairing)),
+    },
+    handleRequest: packet => this.#handleRequest(packet),
+    onChange: () => void this.#publish(),
+    onDisconnect: () => {
+      if (this.#state?.status === 'unlocked') {
+        this.#state = this.#state.lock();
+      }
+      void this.#publish();
+    },
+  });
+
+  async #currentStore(): Promise<VaultStore> {
+    this.#store ??= await openVaultStore();
+    return this.#store;
+  }
 
   /**
    * Lazily open the vault from storage on first use.
    */
   async #current(): Promise<VaultState> {
-    this.#state ??= await openVault(await openVaultStore());
+    this.#state ??= await openVault(await this.#currentStore());
     return this.#state;
   }
 
-  async getState(): Promise<VaultSnapshot> {
-    return toSnapshot(await this.#current());
+  async #snapshot(): Promise<WorkerSnapshot> {
+    return {
+      vault: toSnapshot(await this.#current()),
+      connection: this.#remote.snapshot(),
+    };
   }
 
-  async createVault(params: CreateVaultParams): Promise<VaultSnapshot> {
+  async #publish(): Promise<WorkerSnapshot> {
+    const snapshot = await this.#snapshot();
+    this.#listener?.(snapshot);
+    return snapshot;
+  }
+
+  async #handleRequest(packet: Bytes): Promise<Bytes> {
+    const request = readFrame(packet);
+    if (!request || request.consumed !== packet.length) {
+      throw new Error('received an invalid SSH-agent packet');
+    }
+
+    const state = await this.#current();
+    assertVaultStatus(state, 'unlocked');
+    return handleAgentRequest(request.payload, state.agentBackend());
+  }
+
+  getState(): Promise<WorkerSnapshot> {
+    return this.#snapshot();
+  }
+
+  subscribe(listener: StateListener): Promise<WorkerSnapshot> {
+    this.#listener = listener;
+    return this.#snapshot();
+  }
+
+  async connect(endpoint: string, label: string): Promise<WorkerSnapshot> {
+    const state = await this.#current();
+    this.#remote.setReady(state.status === 'unlocked');
+    await this.#remote.connect(endpoint, label);
+    return this.#snapshot();
+  }
+
+  disconnect(): Promise<WorkerSnapshot> {
+    this.#remote.disconnect();
+    return this.#snapshot();
+  }
+
+  async createVault(params: CreateVaultParams): Promise<WorkerSnapshot> {
     const state = await this.#current();
     assertVaultStatus(state, 'no-vault');
     this.#state = await state.createVault(params);
-    return toSnapshot(this.#state);
+    this.#remote.setReady(true);
+    return this.#publish();
   }
 
-  async unlock(prfOutput: Bytes): Promise<VaultSnapshot> {
+  async unlock(prfOutput: Bytes): Promise<WorkerSnapshot> {
     const state = await this.#current();
     assertVaultStatus(state, 'locked');
     this.#state = await state.unlock(prfOutput);
-    return toSnapshot(this.#state);
+    this.#remote.setReady(true);
+    return this.#publish();
   }
 
-  async lock(): Promise<VaultSnapshot> {
+  async lock(): Promise<WorkerSnapshot> {
     const state = await this.#current();
     assertVaultStatus(state, 'unlocked');
     this.#state = state.lock();
-    return toSnapshot(this.#state);
+    this.#remote.setReady(false);
+    return this.#publish();
   }
 
-  async addKey(pem: string, name?: string): Promise<VaultSnapshot> {
+  async addKey(pem: string, name?: string): Promise<WorkerSnapshot> {
     const state = await this.#current();
     assertVaultStatus(state, 'unlocked');
     this.#state = await state.addKey(pem, name);
-    return toSnapshot(this.#state);
+    return this.#publish();
   }
 
-  async removeKey(keyId: string): Promise<VaultSnapshot> {
+  async removeKey(keyId: string): Promise<WorkerSnapshot> {
     const state = await this.#current();
     assertVaultStatus(state, 'locked', 'unlocked');
     this.#state = await state.removeKey(keyId);
-    return toSnapshot(this.#state);
+    return this.#publish();
   }
 
-  async destroy(): Promise<VaultSnapshot> {
+  async destroy(): Promise<WorkerSnapshot> {
     const state = await this.#current();
     assertVaultStatus(state, 'locked', 'unlocked');
     this.#state = await state.destroy();
-    return toSnapshot(this.#state);
+    this.#remote.setReady(false);
+    return this.#publish();
   }
 }
 
-Comlink.expose(new VaultSession());
+Comlink.expose(new WorkerSession());

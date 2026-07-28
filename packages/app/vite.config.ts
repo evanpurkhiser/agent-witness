@@ -10,4 +10,12 @@ export default defineConfig({
       app: fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  server: {
+    proxy: {
+      '/api/agent': {
+        target: 'http://127.0.0.1:9345',
+        ws: true,
+      },
+    },
+  },
 });

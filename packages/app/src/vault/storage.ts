@@ -6,10 +6,12 @@
 
 import {type DBSchema, openDB} from 'idb';
 
+import type {PairingRecord, PairingStore} from 'app/remote/session';
+
 import type {EncryptedKey, Vault} from './types';
 
 const DB_NAME = 'agent-witness';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 // There is only ever one vault; it lives under this fixed key.
 const VAULT_KEY = 'vault';
@@ -17,6 +19,7 @@ const VAULT_KEY = 'vault';
 interface VaultDBSchema extends DBSchema {
   vault: {key: string; value: Vault};
   keys: {key: string; value: EncryptedKey};
+  pairings: {key: string; value: PairingRecord};
 }
 
 /**
@@ -28,7 +31,7 @@ export type KeyChange = {put: EncryptedKey} | {remove: string};
 /**
  * Persistence for the vault, backed by IndexedDB. There is at most one vault.
  */
-export interface VaultStore {
+export interface VaultStore extends PairingStore {
   /**
    * Load the vault metadata, or null if no vault has been created.
    */
@@ -53,9 +56,14 @@ export interface VaultStore {
  */
 export async function openVaultStore(name: string = DB_NAME): Promise<VaultStore> {
   const db = await openDB<VaultDBSchema>(name, DB_VERSION, {
-    upgrade(database) {
-      database.createObjectStore('vault');
-      database.createObjectStore('keys', {keyPath: 'keyId'});
+    upgrade(database, oldVersion) {
+      if (oldVersion < 1) {
+        database.createObjectStore('vault');
+        database.createObjectStore('keys', {keyPath: 'keyId'});
+      }
+      if (oldVersion < 2) {
+        database.createObjectStore('pairings', {keyPath: 'endpoint'});
+      }
     },
   });
 
@@ -78,6 +86,14 @@ export async function openVaultStore(name: string = DB_NAME): Promise<VaultStore
           : undefined,
         tx.done,
       ]);
+    },
+
+    async loadPairing(endpoint) {
+      return (await db.get('pairings', endpoint)) ?? null;
+    },
+
+    async savePairing(pairing) {
+      await db.put('pairings', pairing);
     },
 
     async destroy() {

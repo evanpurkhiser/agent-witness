@@ -2,6 +2,8 @@ import 'fake-indexeddb/auto';
 
 import {describe, expect, it} from 'vitest';
 
+import type {PairingRecord} from 'app/remote/session';
+
 import {openVaultStore} from './storage';
 import type {EncryptedKey, Vault} from './types';
 
@@ -90,6 +92,24 @@ describe('VaultStore', () => {
     await store.save(sampleVault(), {remove: 'key-1'});
 
     expect(await store.getKey('key-1')).toBeNull();
+  });
+
+  it('persists pairing independently from the vault', async () => {
+    const store = await freshStore();
+    const pairing: PairingRecord = {
+      endpoint: 'wss://server.example/api/agent',
+      serverId: '11111111-2222-4333-8444-555555555555',
+      clientId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+      credential: bytes(1, 2, 3),
+      label: 'Browser',
+      pairedAt: 1000,
+    };
+
+    await store.savePairing(pairing);
+    await store.save(sampleVault());
+    await store.destroy();
+
+    expect(await store.loadPairing(pairing.endpoint)).toEqual(pairing);
   });
 
   it('destroys the vault and all keys', async () => {

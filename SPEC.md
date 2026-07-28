@@ -6,18 +6,25 @@ that never leave your devices.
 ## Implementation status
 
 This spec describes the whole system; much of it is still design. The
-security-sensitive client core is built and unit-tested (Vitest); the live
-session wiring and the server are not yet written.
+security-sensitive client core is built and unit-tested (Vitest), and the
+initial Rust server request path is implemented. The browser's live session
+wiring and the server's durable operational services remain.
 
 **Implemented (client vault core):** SSH key parsing (`openssh-key-v1`), SSH
 wire encoding, public-key fingerprints, the WebCrypto envelope (passkey → master
-key → per-key wrapping), IndexedDB storage, and the typestate vault API.
+key → per-key wrapping), IndexedDB storage, the typestate vault API, ssh-agent
+message framing and dispatch, and vault-backed signing.
+
+**Implemented (server phase 1):** the queue-first request broker and
+connection/capacity gates, request deadlines and remote-attempt correlation,
+local cancellation through remote `CancelRequest`, daemon configuration and
+lifecycle, a bounded permission-restricted Unix SSH-agent socket, and the
+MessagePack WebSocket adapter with process-local first-client pairing.
 
 **Not yet implemented (still as designed below):** the dedicated worker's live
-session wiring and page↔worker message protocol, the ssh-agent protocol
-handling, the WebSocket transport, signing over the wire, the service worker and
-Web Push, and the entire Rust server (Unix socket, request broker, push,
-pairing).
+session and WebSocket control API, signing over the wire, the service worker
+and Web Push, server control IPC, persistent pairing, push delivery, and
+frontend asset serving.
 
 Note: there is **no Rust/WASM on the client**. A spike proved a hand-rolled
 ssh-agent in TypeScript authenticates against a real OpenSSH `sshd`, and Ed25519
@@ -188,10 +195,11 @@ signing live — in TypeScript over WebCrypto, not in WASM.
 - Hold unlocked keys as non-extractable `CryptoKey`s
 - Open and maintain the WebSocket
 - Receive remote agent messages
+- Buffer a bounded number of agent requests in memory while the vault is locked
 - Implement the ssh-agent protocol and produce signatures via WebCrypto
 - Return encoded responses over the WebSocket
 - Notify the page about connection and request state
-- Lock and drop the resident master key and signing keys when disconnected
+- Drop the resident master key and signing keys when locked or disconnected
 - Enforce idle and session timeouts
 
 **Should not:**
@@ -205,10 +213,14 @@ signing live — in TypeScript over WebCrypto, not in WASM.
 The worker is the owner of the active session:
 
 ```
-WebSocket lifetime ≈ unlocked-agent lifetime ≈ worker lifetime
+WebSocket lifetime ≈ worker lifetime
+unlocked-agent lifetime ⊆ WebSocket lifetime
 ```
 
-When the worker terminates, the server should treat the agent as unavailable.
+The authenticated worker may receive requests before WebAuthn unlocks the
+vault. Those requests stay only in worker memory and are processed after
+unlock. When the worker terminates, the server should treat the agent as
+unavailable.
 
 ### Vault core (crypto and protocol)
 
@@ -356,6 +368,11 @@ information, non-sensitive preferences, and optional encrypted audit records.
 
 ### Worker memory
 
+Held while connected:
+
+- Bounded agent requests waiting for vault unlock
+- Active request IDs, attempts, and deadlines
+
 Held only while unlocked:
 
 - Vault master key, as a non-extractable `CryptoKey`
@@ -400,23 +417,28 @@ service worker.
 
 ## Server daemon
 
-The server is the bridge between local SSH-agent clients and the remote unlocked
-agent.
+The server is the bridge between local SSH-agent clients and the remote browser
+worker.
+
+The detailed Rust module layout and dependency plan live in
+[`design/SERVER.md`](design/SERVER.md).
 
 ### Core responsibilities
 
 - Listen on a Unix socket exposed as `SSH_AUTH_SOCK`
 - Accept local SSH-agent protocol requests
-- Track whether an unlocked remote agent is currently connected
+- Track whether an authenticated remote worker is connected and whether its
+  vault is locked
 - Maintain the active WebSocket session
-- Forward raw SSH-agent packets to the connected agent
+- Forward raw SSH-agent packets to the connected worker, including while locked
 - Correlate responses with waiting Unix-socket requests
-- Trigger a push notification when no agent is connected
-- Wait for the PWA to connect and unlock
-- Resume the pending request once the agent becomes available
+- Trigger a push notification when no worker is connected
+- Wait for the PWA to connect when it is unavailable
+- Let a connected worker hold requests until the user unlocks the vault
 - Enforce request deadlines and cancellation
 - Persist pairing and push-subscription state
-- Expose health and diagnostic state to logs or a local CLI
+- Expose health, diagnostic state, and administrative operations through a
+  local control socket and CLI
 
 ### Suggested state model
 
@@ -428,12 +450,13 @@ disconnected
         → waiting for agent
 
 connected
-  ├── locked/unavailable
+  ├── locked/buffering requests
   └── unlocked/ready
 ```
 
-The distinction between WebSocket connected and agent ready matters. The PWA may
-connect before WebAuthn finishes or after the vault has locked.
+The distinction between WebSocket connected and vault ready still matters for
+status and client behavior, but not for server dispatch. The PWA may connect
+before WebAuthn finishes or remain connected after the vault locks.
 
 A more explicit enum:
 
@@ -441,12 +464,29 @@ A more explicit enum:
 enum RemoteAgentState {
     Disconnected,
     Connecting,
-    ConnectedLocked,
+    Locked,
     Ready {
         session_id: SessionId,
     },
 }
 ```
+
+A request does not take a different path based on this state. Every accepted
+local request enters the same broker queue first, even when a worker is already
+connected. Connection state and remote buffer capacity act as gates controlling
+when queued requests may be dispatched:
+
+```
+request queued
+  + authenticated client connected
+  + remote capacity available
+  + deadline not reached
+  = dispatch permitted
+```
+
+Vault readiness is not a dispatch gate. A locked worker holds delivered requests
+in memory, prompts the page to unlock, and responds after WebAuthn succeeds.
+This avoids separate disconnected, locked, and ready server flows.
 
 ### Request lifecycle
 
@@ -455,17 +495,25 @@ local process writes SSH-agent request
         ↓
 server assigns request ID
         ↓
-agent ready?
-   yes ───────────────→ send over WebSocket
-   no
+server admits request to queue
         ↓
-coalesce pending requests
+reconcile connection/capacity gates
         ↓
-send push notification
+client connected?
+   no → coalesce wake demand
+        → send push notification
+        → wait for PWA connection
+        → reconcile connection/capacity gates
         ↓
-wait for PWA connection and unlock
+   yes ─┘
+send request over WebSocket
         ↓
-send request
+vault unlocked?
+   no → buffer in worker memory
+        → notify page and wait for unlock
+   yes
+        ↓
+process request
         ↓
 receive response
         ↓
@@ -474,6 +522,32 @@ write raw response to Unix socket
 
 The local Unix connection should remain blocked while the phone is being opened
 and unlocked.
+
+The broker should behave like a controller rather than a collection of
+state-specific workflows. Each event updates the broker's facts and runs the
+same reconciliation step. Relevant events include:
+
+- Local request admitted
+- Local caller disconnected
+- Remote client connected
+- Vault became ready
+- Vault locked
+- Remote client disconnected
+- Remote response received
+- Request deadline expired
+
+Each request follows one lifecycle:
+
+```
+queued → delivered/in flight → completed
+   │                  │
+   └──────────────────┴──→ expired or cancelled
+```
+
+A disconnect returns that session's in-flight requests to the queue, subject to
+their original deadlines. The broker records a session ID and attempt number
+for each dispatch, and the attempt number travels over the wire, so a late
+response from an earlier session or attempt cannot complete a requeued request.
 
 You will need a timeout, likely configurable:
 
@@ -490,48 +564,85 @@ You can preserve the raw SSH-agent bytes and add only a thin envelope:
 
 ```rust
 enum ClientMessage {
-    AgentReady {
-        session_id: Uuid,
+    PairRequest {
+        label: String,
     },
+    Authenticate {
+        client_id: Uuid,
+        credential: Vec<u8>,
+    },
+    AgentReady,
     AgentLocked,
     AgentResponse {
         request_id: Uuid,
+        attempt: u32,
         payload: Vec<u8>,
     },
     Pong,
 }
 
 enum ServerMessage {
+    Paired {
+        server_id: Uuid,
+        client_id: Uuid,
+        credential: Vec<u8>,
+        session_id: Uuid,
+    },
+    Authenticated {
+        server_id: Uuid,
+        session_id: Uuid,
+    },
+    Rejected,
     AgentRequest {
         request_id: Uuid,
+        attempt: u32,
         payload: Vec<u8>,
     },
     CancelRequest {
         request_id: Uuid,
+        attempt: u32,
     },
     Ping,
 }
 ```
 
-Use a binary serialization format such as:
+The first application message on a new WebSocket must be a handshake message.
+The server assigns the connection's session ID and does not process
+`ClientMessage` values until pairing or authentication succeeds. Once
+authenticated, the server may send `AgentRequest` while the client reports
+locked. The worker buffers it in memory and uses the request event to prompt the
+page for unlock. `CancelRequest` removes a buffered or active attempt when its
+local caller expires.
 
-- MessagePack
-- CBOR
-- postcard
-- A tiny custom binary envelope
+Each application message occupies exactly one binary WebSocket message and
+contains one named-field MessagePack value:
 
-Since the SSH-agent payload is already binary, JSON would just add base64
-overhead.
-
-A custom envelope could be as simple as:
-
+```text
+{
+  version: 1,
+  message: {
+    type: "agent_response",
+    request_id: "81cbbdd8-fd6e-44d3-88e8-41ed8f3f3499",
+    attempt: 1,
+    packet: <MessagePack binary>
+  }
+}
 ```
-version       u8
-message_type  u8
-request_id    16 bytes
-payload_len   u32
-payload       n bytes
-```
+
+The `message.type` values are the snake-case names shown by the Rust enums
+above. UUIDs use standard hyphenated strings so the TypeScript side does not
+need a custom extension codec. Credentials and complete SSH-agent packets use
+MessagePack's binary type and decode to `Uint8Array` in the browser.
+
+Named maps are slightly larger than positional tuples, but keep field order
+out of the protocol and make additions easier to handle across Rust and
+TypeScript. Breaking representation changes increment the envelope version.
+Rust and TypeScript maintain shared semantic fixtures that each implementation
+must encode and decode.
+
+The server sends an application `Ping` every 30 seconds. A client that does not
+send the application `Pong` before the next interval is disconnected and its
+unfinished requests return to the broker queue.
 
 ### Concurrency model
 
@@ -589,8 +700,8 @@ Likely state:
 struct PairedClient {
     client_id: Uuid,
     label: String,
-    push_subscription: PushSubscription,
-    client_public_key: Vec<u8>,
+    push_subscription: Option<PushSubscription>,
+    credential_hash: Vec<u8>,
     created_at: DateTime<Utc>,
     last_seen_at: Option<DateTime<Utc>>,
 }
@@ -615,9 +726,12 @@ server_id = "build-server"
 public_key = "..."
 private_key_file = "/var/lib/agent-witness/vapid.key"
 
-[[clients]]
+[client]
 id = "..."
 label = "Evan's iPhone"
+credential_hash = "..."
+
+[client.push_subscription]
 endpoint = "https://..."
 p256dh = "..."
 auth = "..."
@@ -635,20 +749,135 @@ owned by the service user with mode `0600` where appropriate.
 
 ### Pairing
 
-When the PWA first registers, it should pair with the server using a one-time
-token or QR code.
+Pairing is automatic. An unpaired server atomically claims the first browser
+client that opens the WebSocket and completes the pairing handshake. There is no
+QR code or separately generated one-time token.
 
 Pairing establishes:
 
 - Server identity
 - Client identity
 - WebSocket authorization
-- Push subscription
+- Authorization to register a push subscription
 - Optional display name
 - Optional allowed Tailscale identity
 
-The server should not accept arbitrary browser connections merely because they
-know the WebSocket URL.
+The initial WebSocket handshake should work as follows:
+
+1. The client connects over TLS and sends a `PairRequest`.
+2. If the server has no paired client, it generates a client ID and random
+   long-lived credential, persists the credential hash, and responds with the
+   client ID and credential.
+3. The browser stores that credential in IndexedDB.
+4. Future WebSocket connections authenticate by sending the client ID and
+   credential as their first application message.
+5. The server does not accept agent readiness or protocol messages until the
+   connection is authenticated.
+
+The credential must have enough entropy to resist guessing without a
+password-hardening function. The server stores only its cryptographic hash and
+compares presented credentials in constant time.
+
+The server stores at most one paired client, and only one authenticated
+connection may hold the active agent session. Once pairing state exists,
+unauthenticated pairing requests are rejected. Pairing can be reset explicitly
+through a local administrative command, which invalidates the existing client
+and returns the server to its unpaired state.
+
+Automatic first-client pairing deliberately makes initial deployment a
+trust-on-first-use operation. The server must be reached through TLS and should
+preferably be exposed only over Tailscale or another private authenticated
+network before it is started unpaired. If an unexpected client wins the initial
+race, the administrator must reset pairing before using the service.
+
+### Local control CLI
+
+The `agent-witness` binary should also provide a local administrative CLI that
+communicates with the running daemon over a dedicated Unix control socket. The
+control protocol must not share the SSH-agent socket: `SSH_AUTH_SOCK` accepts
+untrusted ssh-agent packets, while the control socket exposes privileged
+operations and diagnostic state.
+
+Initial commands:
+
+```console
+agent-witness serve
+agent-witness status
+agent-witness stats
+agent-witness pairing clear
+```
+
+`serve` runs the daemon and is the command used by the systemd service. Client
+commands discover the control socket from the normal configuration and accept a
+global `--control-socket PATH` override for recovery and testing.
+
+`status` reports a current snapshot:
+
+- Server ID and process uptime
+- Whether a client is paired, including its label and last-seen time
+- Remote agent state: disconnected, connected and locked, or ready
+- Active session ID and connection age where applicable
+- Queued and in-flight request counts
+- Earliest pending request deadline
+- Unix agent and control socket paths
+- Push configuration and last delivery result, without subscription secrets
+
+`stats` reports process-lifetime counters with the time at which collection
+started:
+
+- Local requests accepted, completed, failed, timed out, and cancelled
+- Requests requeued after a remote disconnect
+- Remote connection attempts, successful authentications, and authentication
+  failures
+- Push notifications attempted, accepted by the push service, and failed
+- Pairing and pairing-reset counts
+
+These counters do not initially need to survive a daemon restart. Persistent
+metrics can be added later without changing the CLI contract.
+
+`pairing clear` idempotently removes the paired client, its credential hash, and
+its push subscription. It also disconnects the active remote session and
+returns the server to its unpaired state. Any in-flight requests return to the
+queue and all pending requests retain their original deadlines while waiting
+for a new client to pair. The interactive CLI asks for confirmation when a
+client is paired; `--yes` permits explicit non-interactive use. Success reports
+whether pairing state actually existed.
+
+Human-readable output is the default. Read-only commands should also accept
+`--json` so scripts and diagnostics can consume a stable, versioned response
+without parsing presentation text. Errors should distinguish connection
+failure, permission denial, incompatible protocol version, invalid command, and
+daemon-side failure.
+
+The control protocol should be a small versioned request/response protocol over
+a length-prefixed Unix stream. Requests and responses may use JSON initially
+because control messages are small and contain no SSH-agent payloads. Each CLI
+invocation connects, performs one request, receives one response, and closes.
+
+Example protocol shape:
+
+```rust
+enum ControlRequest {
+    Status,
+    Stats,
+    ClearPairing,
+}
+
+enum ControlResponse {
+    Status(StatusSnapshot),
+    Stats(StatsSnapshot),
+    PairingCleared {
+        had_client: bool,
+    },
+    Error(ControlError),
+}
+```
+
+The daemon must create the control socket with restrictive permissions and
+should verify local peer credentials where the platform supports it. Mutating
+commands must never be exposed over the browser-facing HTTP or WebSocket
+interface. Control responses must not include pairing credentials, credential
+hashes, push-subscription secrets, raw SSH-agent packets, or signing payloads.
 
 ### Unix socket behavior
 
@@ -665,7 +894,9 @@ Example config:
 
 ```toml
 unix_socket = "/run/user/1000/agent-witness.sock"
+control_socket = "/run/user/1000/agent-witness-control.sock"
 socket_mode = "0600"
+control_socket_mode = "0600"
 request_timeout = "90s"
 max_pending_requests = 32
 ```
@@ -681,6 +912,9 @@ server/
   pairing.rs
   state.rs
   config.rs
+  control.rs
+  cli.rs
+  stats.rs
 ```
 
 The central component is a request broker:
@@ -688,7 +922,9 @@ The central component is a request broker:
 ```rust
 struct RequestBroker {
     remote_agent: Option<RemoteAgentSession>,
+    /// Authoritative set of all queued and in-flight requests.
     pending: HashMap<RequestId, PendingRequest>,
+    /// FIFO subset of pending requests that have not been dispatched.
     queue: VecDeque<RequestId>,
 }
 ```

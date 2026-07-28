@@ -1,125 +1,175 @@
-import {useEffect, useState} from 'react';
+import {type FormEvent, useState} from 'react';
 
-import * as Comlink from 'comlink';
+import {useWorker} from './use-worker';
 
-import type {VaultSnapshot, VaultView, WorkerApi} from 'app/worker-api';
-
-import {authenticatePasskey, registerPasskey} from './webauthn';
-
-const worker = Comlink.wrap<WorkerApi>(
-  new Worker(new URL('./worker.ts', import.meta.url), {type: 'module'}),
-);
-
-/**
- * Minimal, unstyled UI over the worker's vault API. Every action returns a fresh
- * snapshot, which drives the render.
- */
 export function App() {
-  const [snapshot, setSnapshot] = useState<VaultSnapshot | null>(null);
+  const {
+    snapshot,
+    error,
+    working,
+    createVault,
+    unlock,
+    connect,
+    disconnect,
+    lock,
+    destroy,
+    addKey,
+    removeKey,
+  } = useWorker();
   const [pem, setPem] = useState('');
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    worker.getState().then(setSnapshot, reportError);
-  }, []);
-
-  function reportError(cause: unknown): void {
-    setError(cause instanceof Error ? cause.message : String(cause));
-  }
-
-  async function run(action: () => Promise<VaultSnapshot>): Promise<void> {
-    setError(null);
-    try {
-      setSnapshot(await action());
-    } catch (cause) {
-      reportError(cause);
-    }
-  }
-
-  function createVault(): Promise<void> {
-    return run(async () => worker.createVault(await registerPasskey()));
-  }
-
-  function unlock(view: VaultView): Promise<void> {
-    return run(async () => {
-      const [passkey] = view.passkeys;
-      return worker.unlock(await authenticatePasskey(passkey.credentialId, passkey.salt));
-    });
-  }
-
-  async function addKey(): Promise<void> {
-    await run(() => worker.addKey(pem));
+  async function submitKey(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    await addKey(pem);
     setPem('');
   }
 
-  return (
-    <main>
-      <h1>agent-witness</h1>
-      {error && <p role="alert">Error: {error}</p>}
-      {renderContent()}
-    </main>
-  );
-
-  function renderContent() {
-    if (!snapshot) {
-      return <p>Loading…</p>;
-    }
-
-    if (snapshot.status === 'no-vault') {
-      return (
-        <button type="button" onClick={createVault}>
-          Create vault
-        </button>
-      );
-    }
-
-    if (snapshot.status === 'locked') {
-      const {vault: view} = snapshot;
-      return (
-        <>
-          <p>Vault locked ({view.keys.length} keys)</p>
-          <button type="button" onClick={() => unlock(view)}>
-            Unlock with {view.passkeys[0].label}
-          </button>
-          <button type="button" onClick={() => run(() => worker.destroy())}>
-            Delete vault
-          </button>
-        </>
-      );
-    }
-
-    const {vault: view} = snapshot;
+  if (!snapshot) {
     return (
-      <>
-        <button type="button" onClick={() => run(() => worker.lock())}>
-          Lock
-        </button>
-        <button type="button" onClick={() => run(() => worker.destroy())}>
-          Delete vault
-        </button>
-        <ul>
-          {view.keys.map(key => (
-            <li key={key.id}>
-              {key.name} — {key.type} — {key.fingerprint}{' '}
-              <button type="button" onClick={() => run(() => worker.removeKey(key.id))}>
-                Remove
-              </button>
-            </li>
-          ))}
-        </ul>
-        <textarea
-          value={pem}
-          onChange={event => setPem(event.target.value)}
-          placeholder="Paste an OpenSSH private key"
-          rows={8}
-          cols={70}
-        />
-        <div>
-          <button type="button" onClick={addKey} disabled={pem.trim() === ''}>
-            Add SSH key
-          </button>
-        </div>
-      </>
+      <main>
+        <h1>agent-witness</h1>
+        {error ? <p role="alert">{error}</p> : <p>Loading…</p>}
+      </main>
     );
   }
+
+  const {connection, vault} = snapshot;
+
+  return (
+    <main>
+      <header>
+        <h1>agent-witness</h1>
+        <p>Remote SSH agent</p>
+      </header>
+
+      {error && <p role="alert">{error}</p>}
+      {connection.error && <p role="alert">{connection.error}</p>}
+
+      <section aria-labelledby="connection-heading">
+        <h2 id="connection-heading">Connection</h2>
+        <dl>
+          <dt>Status</dt>
+          <dd>{connection.status}</dd>
+          {connection.serverId && (
+            <>
+              <dt>Server</dt>
+              <dd>{connection.serverId}</dd>
+            </>
+          )}
+        </dl>
+        {connection.status === 'connected' ? (
+          <button type="button" disabled={working} onClick={disconnect}>
+            Disconnect
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled={working || connection.status === 'connecting'}
+            onClick={connect}
+          >
+            {connection.status === 'connecting' ? 'Connecting…' : 'Connect'}
+          </button>
+        )}
+      </section>
+
+      {connection.pendingRequests > 0 && (
+        <section aria-labelledby="requests-heading" aria-live="polite">
+          <h2 id="requests-heading">Pending requests</h2>
+          <p>
+            {connection.pendingRequests}{' '}
+            {connection.pendingRequests === 1 ? 'request is' : 'requests are'} waiting.
+          </p>
+          {vault.status === 'locked' && (
+            <button type="button" disabled={working} onClick={() => unlock(vault.vault)}>
+              Unlock and approve
+            </button>
+          )}
+          {vault.status === 'unlocked' && <p>Approving requests…</p>}
+          {vault.status === 'no-vault' && (
+            <p>Create a vault and add an SSH key before approving requests.</p>
+          )}
+        </section>
+      )}
+
+      <section aria-labelledby="vault-heading">
+        <h2 id="vault-heading">Vault</h2>
+        {vault.status === 'no-vault' && (
+          <>
+            <p>No vault configured.</p>
+            <button type="button" disabled={working} onClick={createVault}>
+              Create vault
+            </button>
+          </>
+        )}
+
+        {vault.status === 'locked' && (
+          <>
+            <p>Locked. {vault.vault.keys.length} keys available.</p>
+            <button type="button" disabled={working} onClick={() => unlock(vault.vault)}>
+              Unlock with {vault.vault.passkeys[0]?.label ?? 'passkey'}
+            </button>
+            <button type="button" disabled={working} onClick={destroy}>
+              Delete vault
+            </button>
+          </>
+        )}
+
+        {vault.status === 'unlocked' && (
+          <>
+            <p>Unlocked. Requests are approved until the vault is locked.</p>
+            <button type="button" disabled={working} onClick={lock}>
+              Lock
+            </button>
+            <button type="button" disabled={working} onClick={destroy}>
+              Delete vault
+            </button>
+
+            <section aria-labelledby="keys-heading">
+              <h3 id="keys-heading">SSH keys</h3>
+              {vault.vault.keys.length === 0 ? (
+                <p>No SSH keys configured.</p>
+              ) : (
+                <ul>
+                  {vault.vault.keys.map(key => (
+                    <li key={key.id}>
+                      <strong>{key.name}</strong>
+                      <dl>
+                        <dt>Type</dt>
+                        <dd>{key.type}</dd>
+                        <dt>Fingerprint</dt>
+                        <dd>{key.fingerprint}</dd>
+                      </dl>
+                      <button
+                        type="button"
+                        disabled={working}
+                        onClick={() => removeKey(key.id)}
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <form onSubmit={submitKey}>
+                <label htmlFor="private-key">OpenSSH private key</label>
+                <textarea
+                  id="private-key"
+                  value={pem}
+                  onChange={event => setPem(event.target.value)}
+                  rows={8}
+                  cols={70}
+                />
+                <button type="submit" disabled={working || pem.trim() === ''}>
+                  Add SSH key
+                </button>
+              </form>
+            </section>
+          </>
+        )}
+      </section>
+
+      {working && <p aria-live="polite">Working…</p>}
+    </main>
+  );
 }
