@@ -17,6 +17,9 @@ const DEFAULT_UNIX_SOCKET: &str = "/run/agent-witness/agent.sock";
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// Optional durable pairing state file.
+    pub state_path: Option<PathBuf>,
+
     /// Path exposed to local processes as `SSH_AUTH_SOCK`.
     pub unix_socket: PathBuf,
 
@@ -44,6 +47,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            state_path: None,
             unix_socket: PathBuf::from(DEFAULT_UNIX_SOCKET),
             socket_mode: 0o600,
             http_listen: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9345),
@@ -183,6 +187,7 @@ mod tests {
         fs::write(
             &path,
             r#"
+                state_path = "/tmp/agent-witness-state.json"
                 unix_socket = "/tmp/agent-witness.sock"
                 socket_mode = "0660"
                 request_timeout = "15s"
@@ -193,6 +198,10 @@ mod tests {
         let config = Config::extract(Some(&path), ConfigOverrides::default()).unwrap();
 
         assert_eq!(config.unix_socket, PathBuf::from("/tmp/agent-witness.sock"));
+        assert_eq!(
+            config.state_path,
+            Some(PathBuf::from("/tmp/agent-witness-state.json"))
+        );
         assert_eq!(config.socket_mode, 0o660);
         assert_eq!(config.request_timeout, Duration::from_secs(15));
         assert_eq!(config.max_agent_packet_size, 256 * 1024);

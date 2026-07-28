@@ -19,6 +19,7 @@ dependencies = [
  "rmp-serde",
  "rust-embed",
  "serde",
+ "serde_json",
  "sha2",
  "subtle",
  "tempfile",

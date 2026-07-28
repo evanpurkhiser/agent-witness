@@ -6,6 +6,7 @@ use std::{
 };
 
 use bytes::Bytes;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 use thiserror::Error;
@@ -14,8 +15,13 @@ use uuid::Uuid;
 
 const CREDENTIAL_LENGTH: usize = 32;
 
+mod file;
+
+pub use file::FilePairingStore;
+
 /// Complete pairing state owned by a [`PairingStore`].
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PairingState {
     pub(crate) server_id: Uuid,
     pub(crate) client: Option<PairedClient>,
@@ -31,7 +37,8 @@ impl PairingState {
 }
 
 /// The single client authorized to connect to this server.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct PairedClient {
     pub(crate) client_id: Uuid,
     pub(crate) credential_hash: [u8; 32],

@@ -7,17 +7,28 @@ use tokio::{
     sync::mpsc,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::{
     agent_socket::AgentSocket,
     broker::{BrokerConfig, BrokerHandle},
     config::Config,
-    remote::{MemoryPairingStore, PairingService, SessionConfig, protocol::MAX_MESSAGE_OVERHEAD},
+    remote::{
+        FilePairingStore, MemoryPairingStore, PairingService, PairingStore, SessionConfig,
+        protocol::MAX_MESSAGE_OVERHEAD,
+    },
     web,
 };
 
 pub async fn run(config: Config) -> anyhow::Result<()> {
+    let pairing_store: Arc<dyn PairingStore> = match &config.state_path {
+        Some(path) => Arc::new(FilePairingStore::new(path.clone())),
+        None => {
+            warn!("state_path is unset; pairing will be lost when the daemon stops");
+            Arc::new(MemoryPairingStore::new())
+        }
+    };
+    let pairing = Arc::new(PairingService::open(pairing_store).await?);
     let socket = AgentSocket::bind(
         config.unix_socket.clone(),
         config.socket_mode,
@@ -37,7 +48,6 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     );
     let shutdown = CancellationToken::new();
     let mut socket_task = tokio::spawn(socket.serve(local_requests, shutdown.clone()));
-    let pairing = Arc::new(PairingService::open(Arc::new(MemoryPairingStore::new())).await?);
     let router = web::router(
         SessionConfig {
             broker: broker.clone(),
