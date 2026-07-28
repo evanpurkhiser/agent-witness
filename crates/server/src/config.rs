@@ -1,4 +1,5 @@
 use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -23,6 +24,9 @@ pub struct Config {
     #[serde(deserialize_with = "deserialize_mode")]
     pub socket_mode: u32,
 
+    /// Address that serves remote WebSocket connections.
+    pub http_listen: SocketAddr,
+
     /// Maximum time a local request may wait for completion.
     #[serde(with = "humantime_serde")]
     pub request_timeout: Duration,
@@ -32,6 +36,9 @@ pub struct Config {
 
     /// Maximum number of queued and in-flight local requests.
     pub max_pending_requests: usize,
+
+    /// Maximum number of requests delivered to the remote worker at once.
+    pub remote_capacity: usize,
 }
 
 impl Default for Config {
@@ -39,9 +46,11 @@ impl Default for Config {
         Self {
             unix_socket: PathBuf::from(DEFAULT_UNIX_SOCKET),
             socket_mode: 0o600,
+            http_listen: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9345),
             request_timeout: Duration::from_secs(90),
             max_agent_packet_size: 256 * 1024,
             max_pending_requests: 32,
+            remote_capacity: 32,
         }
     }
 }
@@ -108,6 +117,12 @@ impl Config {
         if self.max_pending_requests == 0 {
             return Err(ConfigError::Invalid(
                 "max_pending_requests must be greater than zero".into(),
+            ));
+        }
+
+        if self.remote_capacity == 0 {
+            return Err(ConfigError::Invalid(
+                "remote_capacity must be greater than zero".into(),
             ));
         }
 
@@ -182,6 +197,8 @@ mod tests {
         assert_eq!(config.request_timeout, Duration::from_secs(15));
         assert_eq!(config.max_agent_packet_size, 256 * 1024);
         assert_eq!(config.max_pending_requests, 32);
+        assert_eq!(config.http_listen, "127.0.0.1:9345".parse().unwrap());
+        assert_eq!(config.remote_capacity, 32);
     }
 
     #[test]

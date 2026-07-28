@@ -1,5 +1,5 @@
 [package]
-name = "server"
+name = "agent-witness-server"
 version = "0.0.0"
 edition.workspace = true
 license.workspace = true
@@ -7,26 +7,37 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-bytes = "1"
+anyhow = "1"
+axum = { version = "0.8", features = ["ws"] }
+bytes = { version = "1", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
 figment = { version = "0.10", features = ["toml"] }
 futures-util = { version = "0.3", features = ["sink"] }
+getrandom = "0.4"
 humantime = "2"
 humantime-serde = "1"
+rmp-serde = "1"
 serde = { version = "1", features = ["derive"] }
+sha2 = "0.11"
+subtle = "2"
 thiserror = "2"
 tokio = { version = "1", features = [
   "io-util",
   "macros",
   "net",
   "rt-multi-thread",
+  "signal",
   "sync",
   "time",
 ] }
 tokio-util = { version = "0.7", features = ["codec", "rt"] }
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["serde", "v4"] }
 
 [dev-dependencies]
 tempfile = "3"
+tokio-tungstenite = "0.30"
 
 [[bin]]
 name = "agent-witness"
