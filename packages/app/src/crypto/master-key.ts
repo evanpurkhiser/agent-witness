@@ -2,8 +2,9 @@
 // (HKDF) that encrypts the shared master key; the master key in turn encrypts
 // each SSH private key (see crypto/ssh.ts).
 
-import {seal, unseal} from 'app/crypto/utils';
 import type {Bytes} from 'app/utils/bytes';
+
+import {seal, unseal} from './utils';
 
 const subtle = globalThis.crypto.subtle;
 const te = new TextEncoder();

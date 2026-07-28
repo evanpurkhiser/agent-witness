@@ -3,8 +3,9 @@
 // we do not implement are answered with a failure. The crypto is supplied by an
 // `AgentBackend` so this module stays pure protocol.
 
-import {Reader, Writer} from 'app/ssh/encoding';
 import type {Bytes} from 'app/utils/bytes';
+
+import {Reader, Writer} from './encoding';
 
 /**
  * ssh-agent message type numbers (RFC 9987 §8.1).

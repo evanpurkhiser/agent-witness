@@ -1,12 +1,13 @@
 import {describe, expect, it} from 'vitest';
 
+import {random} from 'app/utils/bytes';
+
 import {
   deriveWrappingKey,
   generateMasterKey,
   unwrapMasterKey,
   wrapMasterKey,
-} from 'app/crypto/master-key';
-import {random} from 'app/utils/bytes';
+} from './master-key';
 
 describe('master key envelope', () => {
   it('round-trips the master key with the same passkey', async () => {

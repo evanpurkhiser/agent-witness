@@ -1,8 +1,9 @@
 // Parser for the `openssh-key-v1` private key container (unencrypted only,
 // cipher "none"). Hand-rolled and browser-safe. See PROTOCOL.key in OpenSSH.
 
-import {Reader, Writer} from 'app/ssh/encoding';
 import {b64decode, bytesEqual} from 'app/utils/bytes';
+
+import {Reader, Writer} from './encoding';
 
 const MAGIC = new TextEncoder().encode('openssh-key-v1\0');
 

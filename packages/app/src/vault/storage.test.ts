@@ -2,8 +2,8 @@ import 'fake-indexeddb/auto';
 
 import {describe, expect, it} from 'vitest';
 
-import {openVaultStore} from 'app/vault/storage';
-import type {EncryptedKey, Vault} from 'app/vault/types';
+import {openVaultStore} from './storage';
+import type {EncryptedKey, Vault} from './types';
 
 /**
  * Build an ArrayBuffer-backed byte array from literal values.

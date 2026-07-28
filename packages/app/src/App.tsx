@@ -2,8 +2,9 @@ import {useEffect, useState} from 'react';
 
 import * as Comlink from 'comlink';
 
-import {authenticatePasskey, registerPasskey} from 'app/webauthn';
 import type {VaultSnapshot, VaultView, WorkerApi} from 'app/worker-api';
+
+import {authenticatePasskey, registerPasskey} from './webauthn';
 
 const worker = Comlink.wrap<WorkerApi>(
   new Worker(new URL('./worker.ts', import.meta.url), {type: 'module'}),

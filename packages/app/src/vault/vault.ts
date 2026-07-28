@@ -14,9 +14,10 @@ import type {AgentBackend} from 'app/ssh/agent';
 import {sshFingerprint} from 'app/ssh/fingerprint';
 import {parseOpenSSHPrivateKey} from 'app/ssh/key';
 import type {Bytes} from 'app/utils/bytes';
-import {createAgentBackend} from 'app/vault/agent-backend';
-import type {VaultStore} from 'app/vault/storage';
-import type {PrivateKeyMeta, Vault} from 'app/vault/types';
+
+import {createAgentBackend} from './agent-backend';
+import type {VaultStore} from './storage';
+import type {PrivateKeyMeta, Vault} from './types';
 
 const VAULT_VERSION = 1;
 

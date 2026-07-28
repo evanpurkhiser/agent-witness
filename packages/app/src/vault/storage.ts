@@ -6,7 +6,7 @@
 
 import {type DBSchema, openDB} from 'idb';
 
-import type {EncryptedKey, Vault} from 'app/vault/types';
+import type {EncryptedKey, Vault} from './types';
 
 const DB_NAME = 'agent-witness';
 const DB_VERSION = 1;

@@ -10,8 +10,8 @@ import {
   readFrame,
   rsaFlavorFromFlags,
   SignFlag,
-} from 'app/ssh/agent';
-import {Reader, Writer} from 'app/ssh/encoding';
+} from './agent';
+import {Reader, Writer} from './encoding';
 
 /**
  * Build an ArrayBuffer-backed byte array from literal values.

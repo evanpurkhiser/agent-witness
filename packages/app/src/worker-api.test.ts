@@ -1,7 +1,8 @@
 import {describe, expect, it} from 'vitest';
 
 import type {Vault} from 'app/vault/types';
-import {toView} from 'app/worker-api';
+
+import {toView} from './worker-api';
 
 /**
  * Build an ArrayBuffer-backed byte array from literal values.

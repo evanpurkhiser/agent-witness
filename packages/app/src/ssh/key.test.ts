@@ -1,14 +1,15 @@
 import {describe, expect, it} from 'vitest';
 
-import {Writer} from 'app/ssh/encoding';
+import {expectKeyType, keyFixture, pubKeyFixture} from 'app/test-helpers';
+import {b64decode, b64encode} from 'app/utils/bytes';
+
+import {Writer} from './encoding';
 import {
   ed25519PublicBlob,
   InvalidKeyFormat,
   parseOpenSSHPrivateKey,
   UnsupportedKey,
-} from 'app/ssh/key';
-import {expectKeyType, keyFixture, pubKeyFixture} from 'app/test-helpers';
-import {b64decode, b64encode} from 'app/utils/bytes';
+} from './key';
 
 /**
  * Wrap raw bytes in an OPENSSH PRIVATE KEY PEM block.

@@ -2,10 +2,11 @@
 // their parsed form, wrapped under the master key (see crypto/master-key.ts),
 // and recovered as non-extractable signing keys.
 
-import {seal, unseal} from 'app/crypto/utils';
 import {Writer} from 'app/ssh/encoding';
 import type {ParsedKey} from 'app/ssh/key';
 import {b64urlencode, concatBytes, type Bytes} from 'app/utils/bytes';
+
+import {seal, unseal} from './utils';
 
 const subtle = globalThis.crypto.subtle;
 const te = new TextEncoder();

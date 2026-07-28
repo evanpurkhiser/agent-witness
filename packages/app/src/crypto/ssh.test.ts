@@ -1,10 +1,11 @@
 import {describe, expect, it} from 'vitest';
 
-import {generateMasterKey} from 'app/crypto/master-key';
-import {importSSHKey, sshSign, unwrapSSHKey, wrapSSHKey} from 'app/crypto/ssh';
 import {Reader} from 'app/ssh/encoding';
 import {expectKeyType, parseKeyFixture} from 'app/test-helpers';
 import {b64urlencode, concatBytes} from 'app/utils/bytes';
+
+import {generateMasterKey} from './master-key';
+import {importSSHKey, sshSign, unwrapSSHKey, wrapSSHKey} from './ssh';
 
 const subtle = globalThis.crypto.subtle;
 const DATA = new TextEncoder().encode('agent-witness ssh key test');

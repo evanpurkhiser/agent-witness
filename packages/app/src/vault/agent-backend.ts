@@ -6,8 +6,9 @@
 import {sshSign, unwrapSSHKey} from 'app/crypto/ssh';
 import {type AgentBackend, rsaFlavorFromFlags} from 'app/ssh/agent';
 import {bytesEqual} from 'app/utils/bytes';
-import type {VaultStore} from 'app/vault/storage';
-import type {Vault} from 'app/vault/types';
+
+import type {VaultStore} from './storage';
+import type {Vault} from './types';
 
 /**
  * Build an agent backend over an unlocked vault's keys and resident master key.

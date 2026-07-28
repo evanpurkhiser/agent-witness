@@ -1,7 +1,8 @@
 import {describe, expect, it} from 'vitest';
 
-import {sshFingerprint} from 'app/ssh/fingerprint';
 import {pubKeyFixture} from 'app/test-helpers';
+
+import {sshFingerprint} from './fingerprint';
 
 // Ground-truth fingerprints from `ssh-keygen -lf <fixture>.pub`.
 const EXPECTED = {

@@ -5,8 +5,9 @@ import {describe, expect, it} from 'vitest';
 import {Reader} from 'app/ssh/encoding';
 import {expectVaultState, keyFixture} from 'app/test-helpers';
 import {random} from 'app/utils/bytes';
-import {openVaultStore} from 'app/vault/storage';
-import {openVault, type UnlockedVault} from 'app/vault/vault';
+
+import {openVaultStore} from './storage';
+import {openVault, type UnlockedVault} from './vault';
 
 const subtle = globalThis.crypto.subtle;
 

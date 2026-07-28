@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest';
 
-import {Reader, Writer} from 'app/ssh/encoding';
+import {Reader, Writer} from './encoding';
 
 describe('Writer/Reader round-trip', () => {
   it('round-trips bytes, integers, and strings', () => {

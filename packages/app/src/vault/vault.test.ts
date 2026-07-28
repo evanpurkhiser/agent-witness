@@ -4,14 +4,15 @@ import {describe, expect, it} from 'vitest';
 
 import {expectVaultState, keyFixture} from 'app/test-helpers';
 import {random} from 'app/utils/bytes';
-import {openVaultStore, type VaultStore} from 'app/vault/storage';
+
+import {openVaultStore, type VaultStore} from './storage';
 import {
   type CreateVaultParams,
   DuplicateKey,
   openVault,
   type UnlockedVault,
   WrongPasskey,
-} from 'app/vault/vault';
+} from './vault';
 
 // Ground-truth fingerprint from `ssh-keygen -lf ed25519.pub`.
 const ED25519_FINGERPRINT = 'SHA256:wCyFHQrqFBBRWCuNhhcbEGlxmNh8w/nfJ1Bpf64T1Bc';
