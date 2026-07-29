@@ -301,10 +301,7 @@ export class RemoteSession {
       error: null,
     });
     this.#send(socket, {type: this.#ready ? 'agent_ready' : 'agent_locked'});
-    // REVIEW: If we made process tryProcess this ready thing could go away
-    if (this.#ready) {
-      this.#drain(socket);
-    }
+    this.#drain(socket);
   }
 
   #enqueue(
@@ -330,10 +327,7 @@ export class RemoteSession {
     });
     this.#pendingChanged();
 
-    if (this.#ready) {
-      // REVIEW: Let's rename this tryProcess and it will just early return immediately if it's not ready.
-      this.#process(socket, key);
-    }
+    this.#tryProcess(socket, key);
   }
 
   #cancel(requestId: string, attempt: number): void {
@@ -343,13 +337,10 @@ export class RemoteSession {
   }
 
   #drain(socket: WebSocket): void {
-    // REVIEW: Write as FP forEach
-    for (const key of this.#pending.keys()) {
-      this.#process(socket, key);
-    }
+    this.#pending.forEach((_pending, key) => this.#tryProcess(socket, key));
   }
 
-  #process(socket: WebSocket, key: string): void {
+  #tryProcess(socket: WebSocket, key: string): void {
     const pending = this.#pending.get(key);
     if (!pending || pending.processing || !this.#ready) {
       return;
