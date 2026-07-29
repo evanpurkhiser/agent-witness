@@ -3,6 +3,7 @@
 // MessagePack's binary representation.
 
 import {decode as decodeMessagePack, encode as encodeMessagePack} from '@msgpack/msgpack';
+import {objectToCamel, objectToSnake} from 'ts-case-convert';
 import {z} from 'zod';
 
 import type {Bytes} from 'app/utils/bytes';
@@ -27,7 +28,7 @@ const labelSchema = z.string().refine(value => {
 }, `label must contain between 1 and ${MAX_LABEL_LENGTH} UTF-8 bytes`);
 const attemptSchema = z.number().int().min(0).max(MAX_U32);
 
-const clientMessageSchema = z.discriminatedUnion('type', [
+const clientWireMessageSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('pair_request'),
     label: labelSchema,
@@ -54,7 +55,34 @@ const clientMessageSchema = z.discriminatedUnion('type', [
   }),
 ]);
 
-const serverMessageSchema = z.discriminatedUnion('type', [
+const clientMessageSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('pair_request'),
+    label: labelSchema,
+  }),
+  z.object({
+    type: z.literal('authenticate'),
+    clientId: z.uuid(),
+    credential: credentialSchema,
+  }),
+  z.object({
+    type: z.literal('agent_ready'),
+  }),
+  z.object({
+    type: z.literal('agent_locked'),
+  }),
+  z.object({
+    type: z.literal('agent_response'),
+    requestId: z.uuid(),
+    attempt: attemptSchema,
+    packet: bytesSchema,
+  }),
+  z.object({
+    type: z.literal('pong'),
+  }),
+]);
+
+const serverWireMessageSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('paired'),
     server_id: z.uuid(),
@@ -86,8 +114,50 @@ const serverMessageSchema = z.discriminatedUnion('type', [
   }),
 ]);
 
-export type ClientMessage = z.infer<typeof clientMessageSchema>;
-export type ServerMessage = z.infer<typeof serverMessageSchema>;
+const serverMessageSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('paired'),
+    serverId: z.uuid(),
+    clientId: z.uuid(),
+    credential: credentialSchema,
+    sessionId: z.uuid(),
+  }),
+  z.object({
+    type: z.literal('authenticated'),
+    serverId: z.uuid(),
+    sessionId: z.uuid(),
+  }),
+  z.object({
+    type: z.literal('rejected'),
+  }),
+  z.object({
+    type: z.literal('agent_request'),
+    requestId: z.uuid(),
+    attempt: attemptSchema,
+    packet: bytesSchema,
+  }),
+  z.object({
+    type: z.literal('cancel_request'),
+    requestId: z.uuid(),
+    attempt: attemptSchema,
+  }),
+  z.object({
+    type: z.literal('ping'),
+  }),
+]);
+
+const clientMessageCodec = z.codec(clientWireMessageSchema, clientMessageSchema, {
+  decode: message => objectToCamel(message) as z.output<typeof clientMessageSchema>,
+  encode: message => objectToSnake(message) as z.output<typeof clientWireMessageSchema>,
+});
+
+const serverMessageCodec = z.codec(serverWireMessageSchema, serverMessageSchema, {
+  decode: message => objectToCamel(message) as z.output<typeof serverMessageSchema>,
+  encode: message => objectToSnake(message) as z.output<typeof serverWireMessageSchema>,
+});
+
+export type ClientMessage = z.output<typeof clientMessageCodec>;
+export type ServerMessage = z.output<typeof serverMessageCodec>;
 
 export type ClientHandshake = Extract<
   ClientMessage,
@@ -109,13 +179,13 @@ function messagePackCodec<Schema extends z.core.$ZodType>(schema: Schema) {
 const clientCodec = messagePackCodec(
   z.object({
     version: z.literal(protocolVersion),
-    message: clientMessageSchema,
+    message: clientMessageCodec,
   }),
 );
 const serverCodec = messagePackCodec(
   z.object({
     version: z.literal(protocolVersion),
-    message: serverMessageSchema,
+    message: serverMessageCodec,
   }),
 );
 

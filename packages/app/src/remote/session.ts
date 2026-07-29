@@ -48,12 +48,9 @@ export interface RemoteSessionOptions {
   createSocket?: (endpoint: string) => WebSocket;
 }
 
-interface PendingRequest {
-  requestId: string;
-  attempt: number;
-  packet: Bytes;
+type PendingRequest = Extract<ServerMessage, {type: 'agent_request'}> & {
   processing: boolean;
-}
+};
 
 // REVIEW: Let's add jsdoc comment sto all the methosd on the remote session
 
@@ -146,7 +143,7 @@ export class RemoteSession {
           pairing
             ? {
                 type: 'authenticate',
-                client_id: pairing.clientId,
+                clientId: pairing.clientId,
                 credential: pairing.credential,
               }
             : {type: 'pair_request', label},
@@ -231,7 +228,7 @@ export class RemoteSession {
         this.#enqueue(socket, message);
         break;
       case 'cancel_request':
-        this.#cancel(message.request_id, message.attempt);
+        this.#cancel(message.requestId, message.attempt);
         break;
       case 'paired':
       case 'authenticated':
@@ -261,8 +258,8 @@ export class RemoteSession {
 
       const pairing: PairingRecord = {
         endpoint: this.#endpoint,
-        serverId: message.server_id,
-        clientId: message.client_id,
+        serverId: message.serverId,
+        clientId: message.clientId,
         credential: message.credential,
         label,
         pairedAt: Date.now(),
@@ -273,16 +270,16 @@ export class RemoteSession {
       }
 
       this.#pairing = pairing;
-      this.#connected(socket, message.server_id, message.session_id);
+      this.#connected(socket, message.serverId, message.sessionId);
       return;
     }
 
     if (message.type === 'authenticated') {
-      if (!this.#pairing || message.server_id !== this.#pairing.serverId) {
+      if (!this.#pairing || message.serverId !== this.#pairing.serverId) {
         throw new Error('server identity does not match the stored pairing');
       }
 
-      this.#connected(socket, message.server_id, message.session_id);
+      this.#connected(socket, message.serverId, message.sessionId);
       return;
     }
 
@@ -308,7 +305,7 @@ export class RemoteSession {
     socket: WebSocket,
     message: Extract<ServerMessage, {type: 'agent_request'}>,
   ): void {
-    const key = requestKey(message.request_id, message.attempt);
+    const key = requestKey(message.requestId, message.attempt);
     if (this.#pending.has(key)) {
       throw new Error('received a duplicate agent request');
     }
@@ -317,12 +314,7 @@ export class RemoteSession {
     }
 
     this.#pending.set(key, {
-      // REVIEW: I kind of feel like the zod thing should decode these as
-      // camelcase, then we would be able to just spread the message into this
-      // PendingRequest thing
-      requestId: message.request_id,
-      attempt: message.attempt,
-      packet: message.packet,
+      ...message,
       processing: false,
     });
     this.#pendingChanged();
@@ -355,7 +347,7 @@ export class RemoteSession {
 
         this.#send(socket, {
           type: 'agent_response',
-          request_id: pending.requestId,
+          requestId: pending.requestId,
           attempt: pending.attempt,
           packet,
         });

@@ -3,7 +3,7 @@ import {describe, expect, it} from 'vitest';
 
 import type {Bytes} from 'app/utils/bytes';
 
-import {decodeServerMessage, encodeClientMessage, type ServerMessage} from './protocol';
+import {decodeServerMessage, encodeClientMessage} from './protocol';
 
 const SERVER_ID = '11111111-2222-4333-8444-555555555555';
 const CLIENT_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
@@ -33,7 +33,7 @@ describe('encodeClientMessage', () => {
   it('matches the Rust authentication fixture', () => {
     const encoded = encodeClientMessage({
       type: 'authenticate',
-      client_id: SERVER_ID,
+      clientId: SERVER_ID,
       credential: bytes(0xde, 0xad, 0xbe, 0xef),
     });
 
@@ -43,7 +43,7 @@ describe('encodeClientMessage', () => {
   it('matches the Rust agent-response fixture', () => {
     const encoded = encodeClientMessage({
       type: 'agent_response',
-      request_id: CLIENT_ID,
+      requestId: CLIENT_ID,
       attempt: 4,
       packet: bytes(0, 0, 0, 1, 6),
     });
@@ -70,14 +70,14 @@ describe('encodeClientMessage', () => {
     expect(() =>
       encodeClientMessage({
         type: 'authenticate',
-        client_id: 'not-a-uuid',
+        clientId: 'not-a-uuid',
         credential: bytes(1),
       }),
-    ).toThrow(/client_id/);
+    ).toThrow(/clientId/);
     expect(() =>
       encodeClientMessage({
         type: 'authenticate',
-        client_id: CLIENT_ID,
+        clientId: CLIENT_ID,
         credential: bytes(),
       }),
     ).toThrow(/credential/);
@@ -87,7 +87,7 @@ describe('encodeClientMessage', () => {
     expect(() =>
       encodeClientMessage({
         type: 'agent_response',
-        request_id: CLIENT_ID,
+        requestId: CLIENT_ID,
         attempt: 0x1_0000_0000,
         packet: bytes(0),
       }),
@@ -99,29 +99,35 @@ describe('decodeServerMessage', () => {
   it('decodes the Rust pairing fixture', () => {
     expect(decodeServerMessage(RUST_SERVER_PAIRED)).toEqual({
       type: 'paired',
-      server_id: SERVER_ID,
-      client_id: CLIENT_ID,
+      serverId: SERVER_ID,
+      clientId: CLIENT_ID,
       credential: bytes(0xde, 0xad, 0xbe, 0xef),
-      session_id: SESSION_ID,
+      sessionId: SESSION_ID,
     });
   });
 
   it('decodes the Rust agent-request fixture', () => {
     expect(decodeServerMessage(RUST_SERVER_AGENT_REQUEST)).toEqual({
       type: 'agent_request',
-      request_id: CLIENT_ID,
+      requestId: CLIENT_ID,
       attempt: 4,
       packet: bytes(0, 0, 0, 1, 11),
     });
   });
 
-  it.each<ServerMessage>([
-    {type: 'authenticated', server_id: SERVER_ID, session_id: SESSION_ID},
-    {type: 'rejected'},
-    {type: 'cancel_request', request_id: CLIENT_ID, attempt: 3},
-    {type: 'ping'},
-  ])('decodes $type', message => {
-    expect(decodeServerMessage(serverFrame(message))).toEqual(message);
+  it.each([
+    [
+      {type: 'authenticated', server_id: SERVER_ID, session_id: SESSION_ID},
+      {type: 'authenticated', serverId: SERVER_ID, sessionId: SESSION_ID},
+    ],
+    [{type: 'rejected'}, {type: 'rejected'}],
+    [
+      {type: 'cancel_request', request_id: CLIENT_ID, attempt: 3},
+      {type: 'cancel_request', requestId: CLIENT_ID, attempt: 3},
+    ],
+    [{type: 'ping'}, {type: 'ping'}],
+  ])('decodes $type', (message, expected) => {
+    expect(decodeServerMessage(serverFrame(message))).toEqual(expected);
   });
 
   it('rejects malformed MessagePack', () => {
@@ -176,7 +182,7 @@ describe('decodeServerMessage', () => {
   });
 });
 
-function serverFrame(message: ServerMessage): Bytes {
+function serverFrame(message: unknown): Bytes {
   return encode({version: 1, message});
 }
 
