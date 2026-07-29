@@ -1,0 +1,7 @@
+.git
+.agents
+.codex
+Dockerfile
+node_modules
+packages/app/dist
+target
