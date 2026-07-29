@@ -2,8 +2,6 @@
 // serializable API to the page over Comlink. The vault's `CryptoKey`s never
 // leave the worker; callers only receive snapshots.
 
-// REVIEW: Let's create a worker module and move this into there, along with the test and worker-api
-
 import * as Comlink from 'comlink';
 
 import {RemoteSession} from 'app/remote/session';
@@ -17,12 +15,7 @@ import {
   type VaultState,
 } from 'app/vault/vault';
 
-import {
-  type StateListener,
-  toSnapshot,
-  type WorkerApi,
-  type WorkerSnapshot,
-} from './worker-api';
+import {type StateListener, toSnapshot, type WorkerApi, type WorkerSnapshot} from './api';
 
 /**
  * Owns the vault and remote agent session, exposing only display-safe snapshots

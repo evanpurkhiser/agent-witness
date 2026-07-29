@@ -3,5 +3,5 @@
   "compilerOptions": {
     "lib": ["ES2022", "WebWorker"]
   },
-  "include": ["src/worker.ts", "src/worker-api.ts"]
+  "include": ["src/worker/index.ts", "src/worker/api.ts"]
 }

@@ -2,10 +2,6 @@ import {type FormEvent, useState} from 'react';
 
 import {useWorker} from './use-worker';
 
-// REVIEW: Let's move the use-worker and this app component into a `app` module
-// in the source root, so we can split out the worker stuff from the app a bit
-// more.
-
 export function App() {
   const {
     snapshot,
