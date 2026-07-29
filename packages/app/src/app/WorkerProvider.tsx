@@ -1,4 +1,12 @@
-import {useCallback, useEffect, useState} from 'react';
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 
 import * as Comlink from 'comlink';
 
@@ -11,10 +19,22 @@ const worker = Comlink.wrap<WorkerApi>(
 
 type WorkerAction = () => Promise<WorkerSnapshot>;
 
-/**
- * Own the page-side worker subscription and expose UI-safe worker actions.
- */
-export function useWorker() {
+interface WorkerContextValue {
+  snapshot: WorkerSnapshot | null;
+  error: string | null;
+  working: boolean;
+  createVault(): Promise<void>;
+  unlock(view: VaultView): Promise<void>;
+  forgetPairing(): Promise<void>;
+  lock(): Promise<void>;
+  destroy(): Promise<void>;
+  addKey(pem: string): Promise<void>;
+  removeKey(keyId: string): Promise<void>;
+}
+
+const WorkerContext = createContext<WorkerContextValue | null>(null);
+
+export function WorkerProvider({children}: {children: ReactNode}) {
   const [snapshot, setSnapshot] = useState<WorkerSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
@@ -121,18 +141,43 @@ export function useWorker() {
     [run],
   );
 
-  return {
-    snapshot,
-    error,
-    working,
-    createVault,
-    unlock,
-    forgetPairing,
-    lock,
-    destroy,
-    addKey,
-    removeKey,
-  };
+  const value = useMemo(
+    () => ({
+      snapshot,
+      error,
+      working,
+      createVault,
+      unlock,
+      forgetPairing,
+      lock,
+      destroy,
+      addKey,
+      removeKey,
+    }),
+    [
+      snapshot,
+      error,
+      working,
+      createVault,
+      unlock,
+      forgetPairing,
+      lock,
+      destroy,
+      addKey,
+      removeKey,
+    ],
+  );
+
+  return <WorkerContext value={value}>{children}</WorkerContext>;
+}
+
+export function useWorker(): WorkerContextValue {
+  const value = useContext(WorkerContext);
+  if (!value) {
+    throw new Error('useWorker must be used within a WorkerProvider');
+  }
+
+  return value;
 }
 
 function websocketEndpoint(): string {

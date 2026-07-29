@@ -1,8 +1,16 @@
 import {type FormEvent, useState} from 'react';
 
-import {useWorker} from './use-worker';
+import {useWorker, WorkerProvider} from './WorkerProvider';
 
 export function InstalledApp() {
+  return (
+    <WorkerProvider>
+      <InstalledAppContent />
+    </WorkerProvider>
+  );
+}
+
+function InstalledAppContent() {
   const {
     snapshot,
     error,
