@@ -12,9 +12,6 @@ import {
   type ServerMessage,
 } from './protocol';
 
-// REVIEW: Is this a magic number?
-const SOCKET_OPEN = 1;
-
 // REVIEW: Needs a comment
 const MAX_PENDING_REQUESTS = 32;
 
@@ -43,28 +40,12 @@ export interface ConnectionSnapshot {
   error: string | null;
 }
 
-// REVIEW: Howcome we need this, isn't there an existing websocket connection
-// type we can use or what? Actually if we're going to have a interface like
-// this. Why not just make it more like a proper event listener and have a
-// `addEventListener('onOpen')` etc etc. There's probably a good package that
-// gives us this. I hate these assigned callback style things
-export interface RemoteSocket {
-  binaryType: BinaryType;
-  readyState: number;
-  onopen: ((event: Event) => void) | null;
-  onmessage: ((event: MessageEvent<unknown>) => void) | null;
-  onerror: ((event: Event) => void) | null;
-  onclose: ((event: CloseEvent) => void) | null;
-  send(data: Bytes): void;
-  close(): void;
-}
-
 export interface RemoteSessionOptions {
   pairingStore: PairingStore;
   handleRequest(packet: Bytes): Promise<Bytes>;
   onChange(): void;
   onDisconnect(): void;
-  createSocket?: (endpoint: string) => RemoteSocket;
+  createSocket?: (endpoint: string) => WebSocket;
 }
 
 interface PendingRequest {
@@ -84,12 +65,9 @@ export class RemoteSession {
   readonly #handleRequest: (packet: Bytes) => Promise<Bytes>;
   readonly #onChange: () => void;
   readonly #onDisconnect: () => void;
-  readonly #createSocket: (endpoint: string) => RemoteSocket;
+  readonly #createSocket: (endpoint: string) => WebSocket;
 
-  #socket: RemoteSocket | null = null;
-
-  // REVIEW: Could this actually be a private getter instead of a instance property
-  #endpoint: string | null = null;
+  #socket: WebSocket | null = null;
 
   #pairing: PairingRecord | null = null;
 
@@ -129,7 +107,6 @@ export class RemoteSession {
 
     const normalized = new URL(endpoint).href;
     const generation = ++this.#generation;
-    this.#endpoint = normalized;
     this.#setSnapshot({
       status: 'connecting',
       serverId: null,
@@ -138,7 +115,7 @@ export class RemoteSession {
     });
 
     let pairing: PairingRecord | null;
-    let socket: RemoteSocket;
+    let socket: WebSocket;
     try {
       pairing = await this.#pairingStore.loadPairing(normalized);
       if (generation !== this.#generation) {
@@ -162,7 +139,7 @@ export class RemoteSession {
     socket.binaryType = 'arraybuffer';
     this.#socket = socket;
 
-    socket.onopen = () => {
+    socket.addEventListener('open', () => {
       try {
         this.#send(
           socket,
@@ -177,14 +154,16 @@ export class RemoteSession {
       } catch (cause) {
         this.#fail(socket, cause);
       }
-    };
-    socket.onmessage = event => {
+    });
+    socket.addEventListener('message', event => {
       this.#receive = this.#receive
         .then(() => this.#receiveMessage(socket, event.data, label))
         .catch(cause => this.#fail(socket, cause));
-    };
-    socket.onerror = () => this.#fail(socket, new Error('WebSocket connection failed'));
-    socket.onclose = () => this.#closed(socket);
+    });
+    socket.addEventListener('error', () =>
+      this.#fail(socket, new Error('WebSocket connection failed')),
+    );
+    socket.addEventListener('close', () => this.#closed(socket));
   }
 
   disconnect(): void {
@@ -192,7 +171,6 @@ export class RemoteSession {
     const socket = this.#socket;
     const wasConnected = this.#snapshot.status === 'connected';
     this.#socket = null;
-    this.#endpoint = null;
     this.#pairing = null;
     this.#clearPending();
     this.#setSnapshot({
@@ -227,11 +205,7 @@ export class RemoteSession {
     }
   }
 
-  async #receiveMessage(
-    socket: RemoteSocket,
-    data: unknown,
-    label: string,
-  ): Promise<void> {
+  async #receiveMessage(socket: WebSocket, data: unknown, label: string): Promise<void> {
     if (socket !== this.#socket) {
       return;
     }
@@ -267,7 +241,7 @@ export class RemoteSession {
   }
 
   async #handshake(
-    socket: RemoteSocket,
+    socket: WebSocket,
     message: ServerMessage,
     label: string,
   ): Promise<void> {
@@ -315,7 +289,11 @@ export class RemoteSession {
     throw new Error('expected a handshake response');
   }
 
-  #connected(socket: RemoteSocket, serverId: string, sessionId: string): void {
+  get #endpoint(): string | null {
+    return this.#socket?.url ?? null;
+  }
+
+  #connected(socket: WebSocket, serverId: string, sessionId: string): void {
     this.#setSnapshot({
       status: 'connected',
       serverId,
@@ -330,7 +308,7 @@ export class RemoteSession {
   }
 
   #enqueue(
-    socket: RemoteSocket,
+    socket: WebSocket,
     message: Extract<ServerMessage, {type: 'agent_request'}>,
   ): void {
     const key = requestKey(message.request_id, message.attempt);
@@ -364,14 +342,14 @@ export class RemoteSession {
     }
   }
 
-  #drain(socket: RemoteSocket): void {
+  #drain(socket: WebSocket): void {
     // REVIEW: Write as FP forEach
     for (const key of this.#pending.keys()) {
       this.#process(socket, key);
     }
   }
 
-  #process(socket: RemoteSocket, key: string): void {
+  #process(socket: WebSocket, key: string): void {
     const pending = this.#pending.get(key);
     if (!pending || pending.processing || !this.#ready) {
       return;
@@ -396,24 +374,20 @@ export class RemoteSession {
       .catch(cause => this.#fail(socket, cause));
   }
 
-  #send(socket: RemoteSocket, message: ClientMessage): void {
-    if (socket !== this.#socket || socket.readyState !== SOCKET_OPEN) {
+  #send(socket: WebSocket, message: ClientMessage): void {
+    if (socket !== this.#socket || socket.readyState !== WebSocket.OPEN) {
       throw new Error('WebSocket is not open');
     }
 
     socket.send(encodeClientMessage(message));
   }
 
-  #fail(socket: RemoteSocket, cause: unknown): void {
+  #fail(socket: WebSocket, cause: unknown): void {
     const message = cause instanceof Error ? cause.message : String(cause);
     this.#finish(socket, 'error', message);
   }
 
-  #finish(
-    socket: RemoteSocket,
-    status: ConnectionSnapshot['status'],
-    error: string,
-  ): void {
+  #finish(socket: WebSocket, status: ConnectionSnapshot['status'], error: string): void {
     if (socket !== this.#socket) {
       return;
     }
@@ -434,7 +408,7 @@ export class RemoteSession {
     }
   }
 
-  #closed(socket: RemoteSocket): void {
+  #closed(socket: WebSocket): void {
     if (socket !== this.#socket) {
       return;
     }

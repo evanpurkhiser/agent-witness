@@ -3,13 +3,7 @@ import {describe, expect, it, vi} from 'vitest';
 
 import type {Bytes} from 'app/utils/bytes';
 
-import type {ServerMessage} from './protocol';
-import {
-  type PairingRecord,
-  type PairingStore,
-  type RemoteSocket,
-  RemoteSession,
-} from './session';
+import {type PairingRecord, type PairingStore, RemoteSession} from './session';
 
 const SERVER_ID = '11111111-2222-4333-8444-555555555555';
 const CLIENT_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
@@ -185,13 +179,13 @@ async function connectSession({
   ready?: boolean;
   handleRequest?: (packet: Bytes) => Promise<Bytes>;
 }): Promise<{session: RemoteSession; socket: FakeSocket}> {
-  const socket = new FakeSocket();
+  const socket = new FakeSocket(ENDPOINT);
   const session = new RemoteSession({
     pairingStore: store,
     handleRequest,
     onChange() {},
     onDisconnect() {},
-    createSocket: () => socket,
+    createSocket: () => socket as unknown as WebSocket,
   });
   session.setReady(ready);
   await session.connect(ENDPOINT, 'Browser');
@@ -199,27 +193,29 @@ async function connectSession({
   return {session, socket};
 }
 
-class FakeSocket implements RemoteSocket {
+class FakeSocket extends EventTarget {
+  readonly url: string;
   binaryType: BinaryType = 'blob';
-  readyState = 0;
-  onopen: ((event: Event) => void) | null = null;
-  onmessage: ((event: MessageEvent<unknown>) => void) | null = null;
-  onerror: ((event: Event) => void) | null = null;
-  onclose: ((event: CloseEvent) => void) | null = null;
+  readyState: number = WebSocket.CONNECTING;
   sent: Bytes[] = [];
 
-  open(): void {
-    this.readyState = 1;
-    this.onopen?.(new Event('open'));
+  constructor(url: string) {
+    super();
+    this.url = url;
   }
 
-  receive(message: ServerMessage): void {
+  open(): void {
+    this.readyState = WebSocket.OPEN;
+    this.dispatchEvent(new Event('open'));
+  }
+
+  receive(message: unknown): void {
     const frame = encode({version: 1, message});
     const data = frame.buffer.slice(
       frame.byteOffset,
       frame.byteOffset + frame.byteLength,
     ) as ArrayBuffer;
-    this.onmessage?.({data} as MessageEvent<ArrayBuffer>);
+    this.dispatchEvent(new MessageEvent('message', {data}));
   }
 
   send(data: Bytes): void {
@@ -227,7 +223,7 @@ class FakeSocket implements RemoteSocket {
   }
 
   close(): void {
-    this.readyState = 3;
+    this.readyState = WebSocket.CLOSED;
   }
 }
 
