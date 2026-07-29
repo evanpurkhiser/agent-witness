@@ -81,6 +81,7 @@ class WorkerSession implements WorkerApi {
       this.#state = this.#state.lock();
     }
 
+    this.#remote.setReady(false);
     await this.#publish();
   }
 
