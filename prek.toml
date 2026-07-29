@@ -8,7 +8,7 @@ hooks = [
   { id = "check-merge-conflict", priority = 100 },
   { id = "check-added-large-files", priority = 100 },
   { id = "check-executables-have-shebangs", priority = 100 },
-  { id = "check-shebang-scripts-are-executable", priority = 100 },
+  { id = "check-shebang-scripts-are-executable", exclude = "\\.rs$", priority = 100 },
   { id = "check-case-conflict", priority = 100 },
   { id = "check-symlinks", priority = 100 },
   { id = "detect-private-key", exclude = "^(packages/app/src/ssh/|fixtures/keys/)", priority = 100 },

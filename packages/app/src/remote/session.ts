@@ -95,7 +95,7 @@ export class RemoteSession {
 
   #ready = false;
 
-  // REVIEW: Lets add a JSDoc comment on what the generatin is used for
+  // REVIEW: Lets add a JSDoc comment on what the generation is used for
   #generation = 0;
 
   // REVIEW: Definitely needs a comment, probably should be called `receiving`
@@ -343,7 +343,7 @@ export class RemoteSession {
 
     this.#pending.set(key, {
       // REVIEW: I kind of feel like the zod thing should decode these as
-      // camelcase, then we wuld be able to just spread the message into this
+      // camelcase, then we would be able to just spread the message into this
       // PendingRequest thing
       requestId: message.request_id,
       attempt: message.attempt,
