@@ -14,7 +14,7 @@ use crate::{
     broker::{BrokerConfig, BrokerHandle},
     config::Config,
     control::ControlSocket,
-    push::VapidKey,
+    push::{PushService, VapidKey},
     remote::{
         FilePairingStore, MemoryPairingStore, PairingService, PairingStore, SessionConfig,
         protocol::MAX_MESSAGE_OVERHEAD,
@@ -24,6 +24,7 @@ use crate::{
 
 pub async fn run(config: Config) -> anyhow::Result<()> {
     let vapid = VapidKey::open(config.vapid_private_key_file.clone()).await?;
+    let vapid_public_key = vapid.public_key();
     let pairing_store: Arc<dyn PairingStore> = match &config.state_path {
         Some(path) => Arc::new(FilePairingStore::new(path.clone())),
         None => {
@@ -32,6 +33,9 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         }
     };
     let pairing = Arc::new(PairingService::open(pairing_store).await?);
+    let push = PushService::new(pairing.clone(), vapid, config.request_timeout);
+    let (wakes, wake_requests) = mpsc::unbounded_channel();
+    let _push_task = tokio::spawn(push.serve(wake_requests));
     let socket = AgentSocket::bind(
         config.unix_socket.clone(),
         config.socket_mode,
@@ -50,6 +54,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             max_pending_requests: config.max_pending_requests,
         },
         incoming_requests,
+        wakes,
     );
     let shutdown = CancellationToken::new();
     let mut socket_task = tokio::spawn(socket.serve(local_requests, shutdown.clone()));
@@ -58,7 +63,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         SessionConfig {
             broker: broker.clone(),
             pairing,
-            vapid_public_key: vapid.public_key(),
+            vapid_public_key,
             remote_capacity: config.remote_capacity,
             shutdown: shutdown.clone(),
         },

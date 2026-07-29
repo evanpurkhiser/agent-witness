@@ -111,6 +111,16 @@ impl PairingService {
 
         Ok(true)
     }
+
+    /// Return the currently registered Web Push subscription, if any.
+    pub(crate) async fn push_subscription(&self) -> Option<PushSubscription> {
+        self.state
+            .lock()
+            .await
+            .client
+            .as_ref()
+            .and_then(|client| client.push_subscription.clone())
+    }
 }
 
 impl PairingAuthority for PairingService {

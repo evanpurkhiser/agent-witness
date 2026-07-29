@@ -189,6 +189,7 @@ mod tests {
             .set_push_subscription(client_id, subscription.clone())
             .await
             .unwrap();
+        assert_eq!(first.push_subscription().await, Some(subscription.clone()));
 
         let stored = FilePairingStore::new(path.clone())
             .load()

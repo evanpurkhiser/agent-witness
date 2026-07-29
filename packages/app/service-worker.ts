@@ -1,21 +1,17 @@
 const serviceWorker = globalThis as unknown as ServiceWorkerGlobalScope;
 
 interface PushPayload {
-  request_id?: string;
-  server?: string;
+  title: string;
+  body: string;
 }
 
 serviceWorker.addEventListener('push', event => {
-  const payload = readPayload(event);
-  const body = payload.server
-    ? `${payload.server} is requesting SSH authentication.`
-    : 'A server is requesting SSH authentication.';
+  const payload = event.data!.json() as PushPayload;
 
   event.waitUntil(
-    serviceWorker.registration.showNotification('SSH authentication requested', {
-      body,
+    serviceWorker.registration.showNotification(payload.title, {
+      body: payload.body,
       data: {url: '/'},
-      tag: payload.request_id,
     }),
   );
 });
@@ -24,18 +20,6 @@ serviceWorker.addEventListener('notificationclick', event => {
   event.notification.close();
   event.waitUntil(openApp());
 });
-
-function readPayload(event: PushEvent): PushPayload {
-  if (!event.data) {
-    return {};
-  }
-
-  try {
-    return event.data.json() as PushPayload;
-  } catch {
-    return {};
-  }
-}
 
 async function openApp(): Promise<void> {
   const windows = await serviceWorker.clients.matchAll({

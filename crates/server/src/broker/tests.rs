@@ -381,12 +381,14 @@ fn cancellation_stops_an_in_flight_attempt_and_frees_capacity() {
 #[tokio::test]
 async fn actor_forwards_and_correlates_a_request() {
     let (requests, incoming) = mpsc::channel(8);
+    let (wakes, _wake_requests) = mpsc::unbounded_channel();
     let (broker, task) = BrokerHandle::spawn(
         BrokerConfig {
             request_timeout: Duration::from_secs(1),
             max_pending_requests: 8,
         },
         incoming,
+        wakes,
     );
     let mut remote = broker.connect_remote(1).await.unwrap();
 
@@ -423,12 +425,14 @@ async fn actor_forwards_and_correlates_a_request() {
 #[tokio::test]
 async fn actor_forwards_local_cancellation_to_the_remote() {
     let (requests, incoming) = mpsc::channel(8);
+    let (wakes, _wake_requests) = mpsc::unbounded_channel();
     let (broker, task) = BrokerHandle::spawn(
         BrokerConfig {
             request_timeout: Duration::from_secs(1),
             max_pending_requests: 8,
         },
         incoming,
+        wakes,
     );
     let mut remote = broker.connect_remote(1).await.unwrap();
     let cancellation = CancellationToken::new();
@@ -468,20 +472,23 @@ async fn actor_forwards_local_cancellation_to_the_remote() {
 #[tokio::test]
 async fn actor_times_out_without_a_remote() {
     let (requests, incoming) = mpsc::channel(8);
+    let (wakes, mut wake_requests) = mpsc::unbounded_channel();
     let (broker, task) = BrokerHandle::spawn(
         BrokerConfig {
             request_timeout: Duration::from_millis(10),
             max_pending_requests: 8,
         },
         incoming,
+        wakes,
     );
 
-    let result = timeout(
-        Duration::from_secs(1),
-        submit_local(&requests, Bytes::from_static(b"request")),
-    )
-    .await
-    .unwrap();
+    let submit = submit_local(&requests, Bytes::from_static(b"request"));
+    let (wake, result) = tokio::join!(
+        timeout(Duration::from_secs(1), wake_requests.recv()),
+        timeout(Duration::from_secs(1), submit),
+    );
+    assert_eq!(wake.unwrap(), Some(()));
+    let result = result.unwrap();
     assert_eq!(result, Err(RequestError::TimedOut));
 
     broker.shutdown().await;

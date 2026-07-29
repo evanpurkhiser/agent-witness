@@ -1,19 +1,33 @@
-//! Web Push key material and, eventually, subscription delivery.
+//! Web Push key material and subscription delivery.
 
 use std::{
     fs::{self, OpenOptions},
     io::{ErrorKind, Write},
     os::unix::fs::{MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
 };
 
 use anyhow::{Context, bail};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use bytes::Bytes;
 use p256::{SecretKey, elliptic_curve::sec1::ToEncodedPoint};
 use serde::{Deserialize, Serialize};
+use tokio::{sync::mpsc, time::timeout};
+use tracing::{info, warn};
+use web_push::{
+    ContentEncoding, HyperWebPushClient, SubscriptionInfo, Urgency, VapidSignatureBuilder,
+    WebPushClient, WebPushMessage, WebPushMessageBuilder,
+};
+
+use crate::remote::PairingService;
 
 const PRIVATE_KEY_LENGTH: usize = 32;
 const PRIVATE_KEY_MODE: u32 = 0o600;
+const DELIVERY_TIMEOUT: Duration = Duration::from_secs(10);
+const NOTIFICATION_TITLE: &str = "SSH authentication requested";
+const NOTIFICATION_BODY: &str = "A server is requesting SSH authentication.";
 
 /// Browser-generated values required to encrypt and deliver a Web Push message.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -43,6 +57,92 @@ impl VapidKey {
         let public_key = self.private_key.public_key().to_encoded_point(false);
         Bytes::copy_from_slice(public_key.as_bytes())
     }
+
+    fn encoded_private_key(&self) -> String {
+        URL_SAFE_NO_PAD.encode(self.private_key.to_bytes())
+    }
+}
+
+/// Publishes coalesced wake requests to the paired browser's push service.
+pub struct PushService {
+    pairing: Arc<PairingService>,
+    vapid: VapidKey,
+    ttl: u32,
+    client: HyperWebPushClient,
+}
+
+impl PushService {
+    pub fn new(pairing: Arc<PairingService>, vapid: VapidKey, request_timeout: Duration) -> Self {
+        Self {
+            pairing,
+            vapid,
+            ttl: request_timeout.as_secs().try_into().unwrap_or(u32::MAX),
+            client: HyperWebPushClient::new(),
+        }
+    }
+
+    /// Deliver each coalesced wake edge without blocking the request broker.
+    pub async fn serve(self, mut wakes: mpsc::UnboundedReceiver<()>) {
+        while wakes.recv().await.is_some() {
+            match self.publish().await {
+                Ok(true) => info!("Web Push notification accepted"),
+                Ok(false) => {}
+                Err(error) => warn!(%error, "could not publish Web Push notification"),
+            }
+        }
+    }
+
+    async fn publish(&self) -> anyhow::Result<bool> {
+        let Some(subscription) = self.pairing.push_subscription().await else {
+            return Ok(false);
+        };
+        let message = build_notification(subscription, &self.vapid, self.ttl)?;
+
+        timeout(DELIVERY_TIMEOUT, self.client.send(message))
+            .await
+            .context("Web Push delivery timed out")?
+            .context("push service rejected notification")?;
+
+        Ok(true)
+    }
+}
+
+fn build_notification(
+    subscription: PushSubscription,
+    vapid: &VapidKey,
+    ttl: u32,
+) -> anyhow::Result<WebPushMessage> {
+    let subscription = SubscriptionInfo::new(
+        subscription.endpoint,
+        subscription.p256dh,
+        subscription.auth,
+    );
+    let signature = VapidSignatureBuilder::from_base64(&vapid.encoded_private_key(), &subscription)
+        .context("could not create VAPID signature")?
+        .build()
+        .context("could not sign Web Push request")?;
+    let payload = notification_payload()?;
+    let mut message = WebPushMessageBuilder::new(&subscription);
+    message.set_ttl(ttl);
+    message.set_urgency(Urgency::High);
+    message.set_payload(ContentEncoding::Aes128Gcm, &payload);
+    message.set_vapid_signature(signature);
+
+    message.build().context("could not build Web Push request")
+}
+
+fn notification_payload() -> anyhow::Result<Vec<u8>> {
+    #[derive(Serialize)]
+    struct Notification<'a> {
+        title: &'a str,
+        body: &'a str,
+    }
+
+    serde_json::to_vec(&Notification {
+        title: NOTIFICATION_TITLE,
+        body: NOTIFICATION_BODY,
+    })
+    .context("could not encode notification payload")
 }
 
 fn open(path: &Path) -> anyhow::Result<VapidKey> {
@@ -138,7 +238,10 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::{PRIVATE_KEY_LENGTH, PRIVATE_KEY_MODE, VapidKey};
+    use super::{
+        NOTIFICATION_BODY, NOTIFICATION_TITLE, PRIVATE_KEY_LENGTH, PRIVATE_KEY_MODE,
+        PushSubscription, Urgency, VapidKey, build_notification, generate, notification_payload,
+    };
 
     #[tokio::test]
     async fn creates_and_reopens_a_restrictive_key_file() {
@@ -172,5 +275,32 @@ mod tests {
         fs::write(&invalid, [0; PRIVATE_KEY_LENGTH]).unwrap();
         fs::set_permissions(&invalid, fs::Permissions::from_mode(0o600)).unwrap();
         assert!(VapidKey::open(invalid).await.is_err());
+    }
+
+    #[test]
+    fn builds_an_encrypted_notification_with_display_only_content() {
+        let vapid = generate().unwrap();
+        let message = build_notification(
+            PushSubscription {
+                endpoint: "https://push.example.test/subscription".into(),
+                expiration_time: None,
+                p256dh: "BGsX0fLhLEJH-Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU".into(),
+                auth: "AAECAwQFBgcICQoLDA0ODw".into(),
+            },
+            &vapid,
+            90,
+        )
+        .unwrap();
+
+        assert_eq!(message.ttl, 90);
+        assert_eq!(message.urgency, Some(Urgency::High));
+        assert!(message.payload.is_some());
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&notification_payload().unwrap()).unwrap(),
+            serde_json::json!({
+                "title": NOTIFICATION_TITLE,
+                "body": NOTIFICATION_BODY,
+            })
+        );
     }
 }

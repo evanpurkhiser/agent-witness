@@ -20,12 +20,14 @@ use uuid::Uuid;
 #[tokio::test]
 async fn websocket_adapts_a_remote_worker_to_the_broker() {
     let (local_requests, incoming_requests) = mpsc::channel(8);
+    let (wakes, _wake_requests) = mpsc::unbounded_channel();
     let (broker, broker_task) = BrokerHandle::spawn(
         BrokerConfig {
             request_timeout: Duration::from_secs(1),
             max_pending_requests: 8,
         },
         incoming_requests,
+        wakes,
     );
     let shutdown = CancellationToken::new();
     let pairing = Arc::new(

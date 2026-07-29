@@ -35,9 +35,10 @@ impl BrokerHandle {
     pub fn spawn(
         config: BrokerConfig,
         local_requests: mpsc::Receiver<PacketRequest>,
+        wakes: mpsc::UnboundedSender<()>,
     ) -> (Self, JoinHandle<()>) {
         let (commands, receiver) = mpsc::channel(128);
-        let task = tokio::spawn(run_broker(config, local_requests, receiver));
+        let task = tokio::spawn(run_broker(config, local_requests, receiver, wakes));
         (Self { commands }, task)
     }
 
@@ -156,6 +157,7 @@ struct BrokerActor {
     state: BrokerState,
     waiters: HashMap<RequestId, Waiter>,
     remote: Option<(SessionId, mpsc::UnboundedSender<RemoteCommand>)>,
+    wakes: mpsc::UnboundedSender<()>,
 }
 
 struct Waiter {
@@ -169,12 +171,14 @@ async fn run_broker(
     config: BrokerConfig,
     mut local_requests: mpsc::Receiver<PacketRequest>,
     mut commands: mpsc::Receiver<Command>,
+    wakes: mpsc::UnboundedSender<()>,
 ) {
     let mut actor = BrokerActor {
         config,
         state: BrokerState::new(config.max_pending_requests),
         waiters: HashMap::new(),
         remote: None,
+        wakes,
     };
     let mut local_requests_open = true;
     let mut cancellations = FuturesUnordered::<CancellationFuture>::new();
@@ -381,7 +385,7 @@ impl BrokerActor {
                     }
                 }
                 Effect::WakeRequired => {
-                    // A later phase will forward this coalesced edge to Web Push.
+                    let _ = self.wakes.send(());
                 }
                 Effect::Complete { request_id, result } => {
                     if let Some(waiter) = self.waiters.remove(&request_id) {

@@ -22,12 +22,14 @@ use tower::ServiceExt;
 #[tokio::test]
 async fn serves_the_embedded_application_with_cache_validation() {
     let (_local_requests, incoming_requests) = mpsc::channel(1);
+    let (wakes, _wake_requests) = mpsc::unbounded_channel();
     let (broker, broker_task) = BrokerHandle::spawn(
         BrokerConfig {
             request_timeout: Duration::from_secs(1),
             max_pending_requests: 1,
         },
         incoming_requests,
+        wakes,
     );
     let pairing = PairingService::open(Arc::new(MemoryPairingStore::new()))
         .await

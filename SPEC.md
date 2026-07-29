@@ -30,11 +30,12 @@ embedded production frontend assets.
 
 **Partially implemented:** the server persists a VAPID private key, includes its
 derived public key in successful remote handshakes, and accepts, validates, and
-durably stores an authenticated client's push subscription.
+durably stores an authenticated client's push subscription. A coalesced broker
+wake sends an encrypted notification through that subscription.
 
-**Not yet implemented (still as designed below):** push delivery, static asset
-caching in the service worker, and the control socket's status and statistics
-commands.
+**Not yet implemented (still as designed below):** invalid push-subscription
+cleanup, static asset caching in the service worker, and the control socket's
+status and statistics commands.
 
 Note: there is **no Rust/WASM on the client**. A spike proved a hand-rolled
 ssh-agent in TypeScript authenticates against a real OpenSSH `sshd`, and Ed25519
@@ -312,15 +313,14 @@ errors `InvalidKeyFormat` and `UnsupportedKey`.
 
 ## Message boundaries
 
-### Service worker → page
+### Push service → service worker
 
-Only wake-up metadata:
+Only display text:
 
 ```ts
-type WakeMessage = {
-  requestId: string;
-  serverLabel: string;
-  expiresAt: number;
+type PushPayload = {
+  title: string;
+  body: string;
 };
 ```
 
@@ -715,9 +715,8 @@ Example payload:
 
 ```json
 {
-  "server_id": "build-server",
-  "pending_requests": 1,
-  "expires_at": 1784671200
+  "title": "SSH authentication requested",
+  "body": "A server is requesting SSH authentication."
 }
 ```
 
