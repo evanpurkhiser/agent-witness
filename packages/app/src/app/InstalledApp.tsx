@@ -58,13 +58,18 @@ function InstalledAppContent() {
       </header>
 
       {error && <p role="alert">{error}</p>}
-      {connection.error && <p role="alert">{connection.error}</p>}
 
       <section aria-labelledby="connection-heading">
         <h2 id="connection-heading">Connection</h2>
         <dl>
           <dt>Status</dt>
           <dd>{connection.status}</dd>
+          {connection.error && (
+            <>
+              <dt>Error</dt>
+              <dd role="alert">{connection.error}</dd>
+            </>
+          )}
           {connection.serverId && (
             <>
               <dt>Server</dt>
