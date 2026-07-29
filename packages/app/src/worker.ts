@@ -2,6 +2,8 @@
 // serializable API to the page over Comlink. The vault's `CryptoKey`s never
 // leave the worker; callers only receive snapshots.
 
+// REVIEW: Let's create a worker module and move this into there, along with the test and worker-api
+
 import * as Comlink from 'comlink';
 
 import {RemoteSession} from 'app/remote/session';
@@ -40,6 +42,7 @@ class WorkerSession implements WorkerApi {
     handleRequest: packet => this.#handleRequest(packet),
     onChange: () => void this.#publish(),
     onDisconnect: () => {
+      // REVIEW: Kind of feel like we can move this to a `#handleDisconnect` and make it `void this.#handleDisconnect()`.
       if (this.#state?.status === 'unlocked') {
         this.#state = this.#state.lock();
       }

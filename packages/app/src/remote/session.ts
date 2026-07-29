@@ -12,7 +12,10 @@ import {
   type ServerMessage,
 } from './protocol';
 
+// REVIEW: Is this a magic number?
 const SOCKET_OPEN = 1;
+
+// REVIEW: Needs a comment
 const MAX_PENDING_REQUESTS = 32;
 
 // REVIEW: Lets add jsdoc style comments above all the interfaces here.
@@ -39,7 +42,11 @@ export interface ConnectionSnapshot {
   error: string | null;
 }
 
-// REVIEW: Howcome we need this, isn't there an existing websocket connection type we can use or what?
+// REVIEW: Howcome we need this, isn't there an existing websocket connection
+// type we can use or what? Actually if we're going to have a interface like
+// this. Why not just make it more like a proper event listener and have a
+// `addEventListener('onOpen')` etc etc. There's probably a good package that
+// gives us this. I hate these assigned callback style things
 export interface RemoteSocket {
   binaryType: BinaryType;
   readyState: number;
@@ -66,6 +73,8 @@ interface PendingRequest {
   processing: boolean;
 }
 
+// REVIEW: Let's add jsdoc comment sto all the methosd on the remote session
+
 /**
  * One browser worker's connection to one agent-witness server.
  */
@@ -77,12 +86,23 @@ export class RemoteSession {
   readonly #createSocket: (endpoint: string) => RemoteSocket;
 
   #socket: RemoteSocket | null = null;
+
+  // REVIEW: Could this actually be a private getter instead of a instance property
   #endpoint: string | null = null;
+
   #pairing: PairingRecord | null = null;
+
   #ready = false;
+
+  // REVIEW: Lets add a JSDoc comment on what the generatin is used for
   #generation = 0;
+
+  // REVIEW: Definitely needs a comment, probably should be called `receiving`
   #receive = Promise.resolve();
+
+  // REVIEW: Needs comment
   #pending = new Map<string, PendingRequest>();
+
   #snapshot: ConnectionSnapshot = {
     status: 'disconnected',
     serverId: null,
@@ -296,6 +316,7 @@ export class RemoteSession {
       error: null,
     });
     this.#send(socket, {type: this.#ready ? 'agent_ready' : 'agent_locked'});
+    // REVIEW: If we made process tryProcess this ready thing could go away
     if (this.#ready) {
       this.#drain(socket);
     }
@@ -314,6 +335,9 @@ export class RemoteSession {
     }
 
     this.#pending.set(key, {
+      // REVIEW: I kind of feel like the zod thing should decode these as
+      // camelcase, then we wuld be able to just spread the message into this
+      // PendingRequest thing
       requestId: message.request_id,
       attempt: message.attempt,
       packet: message.packet,
@@ -322,6 +346,7 @@ export class RemoteSession {
     this.#pendingChanged();
 
     if (this.#ready) {
+      // REVIEW: Let's rename this tryProcess and it will just early return immediately if it's not ready.
       this.#process(socket, key);
     }
   }
@@ -333,6 +358,7 @@ export class RemoteSession {
   }
 
   #drain(socket: RemoteSocket): void {
+    // REVIEW: Write as FP forEach
     for (const key of this.#pending.keys()) {
       this.#process(socket, key);
     }

@@ -2,16 +2,9 @@
 // seal/unseal of one CryptoKey under another. Blob format is
 // `nonce(12) || AES-GCM ciphertext`.
 
-import {concatBytes, type Bytes} from 'app/utils/bytes';
+import {concatBytes, random, type Bytes} from 'app/utils/bytes';
 
 const subtle = globalThis.crypto.subtle;
-
-/**
- * Generate a fresh 12-byte AES-GCM nonce.
- */
-function nonce(): Bytes {
-  return globalThis.crypto.getRandomValues(new Uint8Array(12));
-}
 
 /**
  * Encrypt (wrap) a CryptoKey under `wrappingKey`, returning `nonce || ciphertext`
@@ -23,7 +16,7 @@ export async function seal(
   wrappingKey: CryptoKey,
   additionalData?: Bytes,
 ): Promise<Bytes> {
-  const iv = nonce();
+  const iv = random(12);
   const ciphertext = await subtle.wrapKey(format, key, wrappingKey, {
     name: 'AES-GCM',
     iv,
