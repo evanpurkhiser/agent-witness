@@ -5,5 +5,6 @@ pub mod config;
 pub mod control;
 pub mod daemon;
 pub mod packet;
+pub mod push;
 pub mod remote;
 pub mod web;

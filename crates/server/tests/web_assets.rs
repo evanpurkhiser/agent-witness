@@ -14,6 +14,7 @@ use axum::{
         header::{CACHE_CONTROL, CONTENT_TYPE, ETAG, IF_NONE_MATCH},
     },
 };
+use bytes::Bytes;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
@@ -35,6 +36,7 @@ async fn serves_the_embedded_application_with_cache_validation() {
         SessionConfig {
             broker: broker.clone(),
             pairing: Arc::new(pairing),
+            vapid_public_key: Bytes::from_static(&[4; 65]),
             remote_capacity: 1,
             shutdown: CancellationToken::new(),
         },

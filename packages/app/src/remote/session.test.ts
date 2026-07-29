@@ -10,6 +10,7 @@ const CLIENT_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const SESSION_ID = '12345678-9abc-4def-8123-456789abcdef';
 const REQUEST_ID = '99999999-8888-4777-8666-555555555555';
 const ENDPOINT = 'ws://localhost/api/agent';
+const VAPID_PUBLIC_KEY = bytes(4, ...Array.from({length: 64}, () => 1));
 
 describe('RemoteSession', () => {
   it('pairs a new client, persists its credential, and reports locked', async () => {
@@ -24,6 +25,7 @@ describe('RemoteSession', () => {
       client_id: CLIENT_ID,
       credential: bytes(1, 2, 3),
       session_id: SESSION_ID,
+      vapid_public_key: VAPID_PUBLIC_KEY,
     });
     await settle();
 
@@ -39,6 +41,7 @@ describe('RemoteSession', () => {
       status: 'connected',
       serverId: SERVER_ID,
       sessionId: SESSION_ID,
+      vapidPublicKey: VAPID_PUBLIC_KEY,
     });
     expect(sentMessages(socket).at(-1)).toEqual({type: 'agent_locked'});
   });
@@ -59,10 +62,14 @@ describe('RemoteSession', () => {
       type: 'authenticated',
       server_id: SERVER_ID,
       session_id: SESSION_ID,
+      vapid_public_key: VAPID_PUBLIC_KEY,
     });
     await settle();
 
-    expect(session.snapshot().status).toBe('connected');
+    expect(session.snapshot()).toMatchObject({
+      status: 'connected',
+      vapidPublicKey: VAPID_PUBLIC_KEY,
+    });
     expect(sentMessages(socket).at(-1)).toEqual({type: 'agent_ready'});
   });
 
@@ -80,6 +87,7 @@ describe('RemoteSession', () => {
 
     expect(await store.loadPairing(ENDPOINT)).toBeNull();
     expect(session.snapshot().status).toBe('reconnecting');
+    expect(session.snapshot().vapidPublicKey).toBeNull();
   });
 
   it('buffers requests while locked and drains them after unlock', async () => {
@@ -90,6 +98,7 @@ describe('RemoteSession', () => {
       type: 'authenticated',
       server_id: SERVER_ID,
       session_id: SESSION_ID,
+      vapid_public_key: VAPID_PUBLIC_KEY,
     });
     await settle();
 
@@ -130,6 +139,7 @@ describe('RemoteSession', () => {
       type: 'authenticated',
       server_id: SERVER_ID,
       session_id: SESSION_ID,
+      vapid_public_key: VAPID_PUBLIC_KEY,
     });
     await settle();
 
@@ -164,6 +174,7 @@ describe('RemoteSession', () => {
       type: 'authenticated',
       server_id: SERVER_ID,
       session_id: SESSION_ID,
+      vapid_public_key: VAPID_PUBLIC_KEY,
     });
     await settle();
 
@@ -195,12 +206,14 @@ describe('RemoteSession', () => {
       type: 'authenticated',
       server_id: SERVER_ID,
       session_id: SESSION_ID,
+      vapid_public_key: VAPID_PUBLIC_KEY,
     });
     await settle();
 
     session.setActive(false);
 
     expect(session.snapshot().status).toBe('reconnecting');
+    expect(session.snapshot().vapidPublicKey).toBeNull();
     expect(sockets[0]!.readyState).toBe(WebSocket.CLOSED);
     expect(onDisconnect).toHaveBeenCalledOnce();
 

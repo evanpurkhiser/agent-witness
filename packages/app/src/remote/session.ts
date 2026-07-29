@@ -53,6 +53,7 @@ export interface ConnectionSnapshot {
   status: 'connecting' | 'connected' | 'reconnecting' | 'rejected' | 'error';
   serverId: string | null;
   sessionId: string | null;
+  vapidPublicKey: Bytes | null;
   pendingRequests: number;
   error: string | null;
 }
@@ -118,6 +119,7 @@ export class RemoteSession {
     status: 'connecting',
     serverId: null,
     sessionId: null,
+    vapidPublicKey: null,
     pendingRequests: 0,
     error: null,
   };
@@ -154,6 +156,7 @@ export class RemoteSession {
       status: 'connecting',
       serverId: null,
       sessionId: null,
+      vapidPublicKey: null,
       error: null,
     });
 
@@ -177,6 +180,7 @@ export class RemoteSession {
         status: 'reconnecting',
         serverId: null,
         sessionId: null,
+        vapidPublicKey: null,
         error: null,
       });
       return;
@@ -190,6 +194,7 @@ export class RemoteSession {
       status: 'reconnecting',
       serverId: null,
       sessionId: null,
+      vapidPublicKey: null,
       error: null,
     });
     void this.#open();
@@ -221,6 +226,7 @@ export class RemoteSession {
           status: 'error',
           serverId: null,
           sessionId: null,
+          vapidPublicKey: null,
           error: cause instanceof Error ? cause.message : String(cause),
         });
       }
@@ -284,6 +290,7 @@ export class RemoteSession {
       status: 'reconnecting',
       serverId: null,
       sessionId: null,
+      vapidPublicKey: null,
       error: null,
     });
     await this.#pairingStore.deletePairing(normalized);
@@ -385,7 +392,12 @@ export class RemoteSession {
       }
 
       this.#pairing = pairing;
-      this.#connected(socket, message.serverId, message.sessionId);
+      this.#connected(
+        socket,
+        message.serverId,
+        message.sessionId,
+        message.vapidPublicKey,
+      );
       return;
     }
 
@@ -394,7 +406,12 @@ export class RemoteSession {
         throw new Error('server identity does not match the stored pairing');
       }
 
-      this.#connected(socket, message.serverId, message.sessionId);
+      this.#connected(
+        socket,
+        message.serverId,
+        message.sessionId,
+        message.vapidPublicKey,
+      );
       return;
     }
 
@@ -404,11 +421,17 @@ export class RemoteSession {
   /**
    * Publish an authenticated connection and offer pending work for processing.
    */
-  #connected(socket: WebSocket, serverId: string, sessionId: string): void {
+  #connected(
+    socket: WebSocket,
+    serverId: string,
+    sessionId: string,
+    vapidPublicKey: Bytes,
+  ): void {
     this.#setSnapshot({
       status: 'connected',
       serverId,
       sessionId,
+      vapidPublicKey,
       error: null,
     });
     this.#send(socket, {type: this.#ready ? 'agent_ready' : 'agent_locked'});
@@ -523,6 +546,7 @@ export class RemoteSession {
       status,
       serverId: null,
       sessionId: null,
+      vapidPublicKey: null,
       error,
     });
     socket.close();
@@ -554,6 +578,7 @@ export class RemoteSession {
       status: 'reconnecting',
       serverId: null,
       sessionId: null,
+      vapidPublicKey: null,
       error: null,
     });
     socket.close();

@@ -13,6 +13,8 @@ use thiserror::Error;
 use tokio::sync::{Mutex, watch};
 use uuid::Uuid;
 
+use crate::push::PushSubscription;
+
 const CREDENTIAL_LENGTH: usize = 32;
 
 mod file;
@@ -47,6 +49,8 @@ pub struct PairedClient {
     pub(crate) label: String,
     pub(crate) created_at: u64,
     pub(crate) last_seen_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) push_subscription: Option<PushSubscription>,
 }
 
 /// Asynchronous operation performed by a pairing store.
@@ -129,6 +133,7 @@ impl PairingAuthority for PairingService {
                     label,
                     created_at: now(),
                     last_seen_at: None,
+                    push_subscription: None,
                 }),
             };
             self.store
@@ -172,7 +177,37 @@ impl PairingAuthority for PairingService {
 
             Ok(Authorization::Authenticated {
                 server_id: state.server_id,
+                client_id,
             })
+        })
+    }
+
+    fn set_push_subscription<'a>(
+        &'a self,
+        client_id: Uuid,
+        subscription: PushSubscription,
+    ) -> PairingUpdateFuture<'a> {
+        Box::pin(async move {
+            let mut state = self.state.lock().await;
+            let Some(client) = state.client.as_ref() else {
+                return Err(AuthorizationError::NotPaired);
+            };
+            if client.client_id != client_id {
+                return Err(AuthorizationError::Rejected);
+            }
+
+            let mut next = state.clone();
+            next.client
+                .as_mut()
+                .expect("paired client disappeared")
+                .push_subscription = Some(subscription);
+            self.store
+                .save(&next)
+                .await
+                .map_err(AuthorizationError::Storage)?;
+            *state = next;
+
+            Ok(())
         })
     }
 
@@ -206,7 +241,18 @@ pub enum Authorization {
     Authenticated {
         /// Stable server identity for this store.
         server_id: Uuid,
+
+        /// Identity whose credential authorized the session.
+        client_id: Uuid,
     },
+}
+
+impl Authorization {
+    pub(crate) fn client_id(&self) -> Uuid {
+        match self {
+            Self::Paired { client_id, .. } | Self::Authenticated { client_id, .. } => *client_id,
+        }
+    }
 }
 
 /// Reason a remote handshake could not be authorized.
@@ -239,12 +285,22 @@ pub trait PairingAuthority: Send + Sync {
 
     fn authenticate<'a>(&'a self, client_id: Uuid, credential: Bytes) -> AuthorizationFuture<'a>;
 
+    fn set_push_subscription<'a>(
+        &'a self,
+        client_id: Uuid,
+        subscription: PushSubscription,
+    ) -> PairingUpdateFuture<'a>;
+
     fn subscribe_revocations(&self) -> watch::Receiver<u64>;
 }
 
 /// Asynchronous pairing decision returned by a [`PairingAuthority`].
 pub type AuthorizationFuture<'a> =
     Pin<Box<dyn Future<Output = Result<Authorization, AuthorizationError>> + Send + 'a>>;
+
+/// Asynchronous authenticated update returned by a [`PairingAuthority`].
+pub type PairingUpdateFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<(), AuthorizationError>> + Send + 'a>>;
 
 #[cfg(test)]
 mod tests {
@@ -303,6 +359,7 @@ mod tests {
         let reopened = PairingService::open(store).await.unwrap();
         let Authorization::Authenticated {
             server_id: authenticated_server_id,
+            ..
         } = reopened.authenticate(client_id, credential).await.unwrap()
         else {
             panic!("expected authentication")

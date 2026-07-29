@@ -26,9 +26,13 @@ can clear pairing and revoke an active remote session.
 pairing credential storage, locked request buffering, cancellation, signing
 over the wire, and embedded production frontend assets.
 
-**Not yet implemented (still as designed below):** the service worker and Web
-Push, push-subscription registration and delivery, and the control socket's
-status and statistics commands.
+**Partially implemented:** the server persists a VAPID private key, includes its
+derived public key in successful remote handshakes, and accepts, validates, and
+durably stores an authenticated client's push subscription.
+
+**Not yet implemented (still as designed below):** the service worker, browser
+subscription flow, push delivery, and the control socket's status and statistics
+commands.
 
 Note: there is **no Rust/WASM on the client**. A spike proved a hand-rolled
 ssh-agent in TypeScript authenticates against a real OpenSSH `sshd`, and Ed25519
@@ -594,6 +598,12 @@ enum ClientMessage {
         attempt: u32,
         payload: Vec<u8>,
     },
+    SetPushSubscription {
+        endpoint: String,
+        expiration_time: Option<u64>,
+        p256_dh: String,
+        auth: String,
+    },
     Pong,
 }
 
@@ -603,10 +613,12 @@ enum ServerMessage {
         client_id: Uuid,
         credential: Vec<u8>,
         session_id: Uuid,
+        vapid_public_key: Vec<u8>,
     },
     Authenticated {
         server_id: Uuid,
         session_id: Uuid,
+        vapid_public_key: Vec<u8>,
     },
     Rejected,
     AgentRequest {
@@ -647,8 +659,16 @@ contains one named-field MessagePack value:
 
 The `message.type` values are the snake-case names shown by the Rust enums
 above. UUIDs use standard hyphenated strings so the TypeScript side does not
-need a custom extension codec. Credentials and complete SSH-agent packets use
-MessagePack's binary type and decode to `Uint8Array` in the browser.
+need a custom extension codec. Credentials, VAPID public keys, and complete
+SSH-agent packets use MessagePack's binary type and decode to `Uint8Array` in
+the browser. The VAPID public key is the 65-byte uncompressed P-256 point
+required by `PushManager.subscribe()`.
+
+`SetPushSubscription` is accepted only after authentication. The server binds
+the update to the client ID that authenticated the session, replaces any
+previous subscription in the paired-client record, and closes the session if
+the atomic state save fails. Repeating the same update is valid. A stale session
+cannot modify a replacement pairing.
 
 Named maps are slightly larger than positional tuples, but keep field order
 out of the protocol and make additions easier to handle across Rust and
@@ -728,19 +748,19 @@ A web-push subscription normally includes:
 - Endpoint URL
 - p256dh public key
 - Authentication secret
+- Optional browser-reported expiration time in Unix milliseconds
 
 Store the complete subscription object, not just the URL.
 
-You will also need the server's Web Push credentials, usually a VAPID keypair.
+The server generates its VAPID P-256 keypair on first startup and persists the
+32-byte private scalar at the configured path with mode `0600`. It derives the
+public key rather than storing a second copy. Replacing this private key
+invalidates subscriptions restricted to its public key.
 
 Example state file:
 
 ```toml
 server_id = "build-server"
-
-[vapid]
-public_key = "..."
-private_key_file = "/var/lib/agent-witness/vapid.key"
 
 [client]
 id = "..."

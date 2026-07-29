@@ -152,11 +152,14 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{FilePairingStore, STATE_MODE};
-    use crate::remote::pairing::Authorization;
-    use crate::remote::{PairingAuthority, PairingService};
+    use crate::remote::pairing::{Authorization, AuthorizationError};
+    use crate::{
+        push::PushSubscription,
+        remote::{PairingAuthority, PairingService, PairingStore},
+    };
 
     #[tokio::test]
-    async fn persists_pairing_across_service_instances() {
+    async fn persists_pairing_and_push_subscription_across_service_instances() {
         let directory = tempdir().unwrap();
         let path = directory.path().join("state.json");
         let first = PairingService::open(Arc::new(FilePairingStore::new(path.clone())))
@@ -170,12 +173,36 @@ mod tests {
         else {
             panic!("expected new pairing")
         };
+        let subscription = PushSubscription {
+            endpoint: "https://push.example.test/subscription".into(),
+            expiration_time: None,
+            p256dh: "public-key".into(),
+            auth: "auth-secret".into(),
+        };
+        assert!(matches!(
+            first
+                .set_push_subscription(uuid::Uuid::new_v4(), subscription.clone())
+                .await,
+            Err(AuthorizationError::Rejected)
+        ));
+        first
+            .set_push_subscription(client_id, subscription.clone())
+            .await
+            .unwrap();
+
+        let stored = FilePairingStore::new(path.clone())
+            .load()
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stored.client.unwrap().push_subscription, Some(subscription));
 
         let reopened = PairingService::open(Arc::new(FilePairingStore::new(path)))
             .await
             .unwrap();
         let Authorization::Authenticated {
             server_id: reopened_server_id,
+            ..
         } = reopened.authenticate(client_id, credential).await.unwrap()
         else {
             panic!("expected authentication")

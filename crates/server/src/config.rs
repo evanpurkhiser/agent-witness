@@ -13,6 +13,7 @@ use thiserror::Error;
 
 const DEFAULT_UNIX_SOCKET: &str = "/run/agent-witness/agent.sock";
 const DEFAULT_CONTROL_SOCKET: &str = "/run/agent-witness/control.sock";
+const DEFAULT_VAPID_PRIVATE_KEY_FILE: &str = "/var/lib/agent-witness/vapid.key";
 
 /// Operator-controlled daemon configuration.
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -20,6 +21,9 @@ const DEFAULT_CONTROL_SOCKET: &str = "/run/agent-witness/control.sock";
 pub struct Config {
     /// Optional durable pairing state file.
     pub state_path: Option<PathBuf>,
+
+    /// Persistent private key used to authenticate Web Push delivery.
+    pub vapid_private_key_file: PathBuf,
 
     /// Path used by local administrative commands.
     pub control_socket: PathBuf,
@@ -56,6 +60,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             state_path: None,
+            vapid_private_key_file: PathBuf::from(DEFAULT_VAPID_PRIVATE_KEY_FILE),
             control_socket: PathBuf::from(DEFAULT_CONTROL_SOCKET),
             control_socket_mode: 0o600,
             unix_socket: PathBuf::from(DEFAULT_UNIX_SOCKET),
@@ -215,6 +220,7 @@ mod tests {
                 unix_socket = "/tmp/agent-witness.sock"
                 socket_mode = "0660"
                 request_timeout = "15s"
+                vapid_private_key_file = "/tmp/agent-witness-vapid.key"
             "#,
         )
         .unwrap();
@@ -225,6 +231,10 @@ mod tests {
         assert_eq!(
             config.state_path,
             Some(PathBuf::from("/tmp/agent-witness-state.json"))
+        );
+        assert_eq!(
+            config.vapid_private_key_file,
+            PathBuf::from("/tmp/agent-witness-vapid.key")
         );
         assert_eq!(
             config.control_socket,

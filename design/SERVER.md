@@ -174,7 +174,6 @@ Storage owns mutable durable state:
 - The optional paired client
 - Credential hash
 - Optional push subscription
-- VAPID material or the path containing it
 
 State is small enough for a JSON file. Updates should write a temporary file in
 the same directory, flush it, atomically rename it, and preserve restrictive
@@ -357,8 +356,9 @@ Pairing owns the single paired-client lifecycle:
 - Clear pairing.
 
 Clearing pairing persists the unpaired state before invalidating the active
-session. Late messages from the invalidated session are rejected by their
-session ID.
+session. Push-subscription writes carry the authenticated client ID and are
+rejected if the pairing has since been cleared or replaced. A failed persistent
+update closes the authenticated session.
 
 ### `stats.rs`
 
@@ -544,7 +544,17 @@ silently producing a server without its browser application.
 
 ### Web Push
 
-The provisional choice for the push increment is:
+VAPID key generation uses:
+
+```toml
+p256 = { version = "0.13", default-features = false, features = ["arithmetic"] }
+```
+
+The private scalar is stored separately with mode `0600`; the uncompressed
+public point is derived at startup and included in successful remote
+handshakes.
+
+The provisional choice for push request construction and delivery is:
 
 ```toml
 web-push-native = "0.4"

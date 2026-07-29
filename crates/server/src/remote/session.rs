@@ -1,12 +1,14 @@
 use std::{sync::Arc, time::Duration};
 
 use axum::extract::ws::{Message, WebSocket};
+use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
 use crate::broker::{BrokerError, BrokerHandle, RemoteConnection};
+use crate::push::PushSubscription;
 
 use super::{
     PairingAuthority,
@@ -24,6 +26,9 @@ pub struct SessionConfig {
 
     /// Authority that pairs or authenticates the first application message.
     pub pairing: Arc<dyn PairingAuthority>,
+
+    /// Uncompressed P-256 application-server key used to create push subscriptions.
+    pub vapid_public_key: Bytes,
 
     /// Maximum broker requests assigned to this remote session at once.
     pub remote_capacity: usize,
@@ -68,7 +73,12 @@ pub async fn serve(mut socket: WebSocket, config: SessionConfig) {
         }
     };
 
-    let response = handshake_response(authorization, connection.session_id);
+    let client_id = authorization.client_id();
+    let response = handshake_response(
+        authorization,
+        connection.session_id,
+        config.vapid_public_key.clone(),
+    );
     let Ok(response) = encode_server(response) else {
         let _ = config
             .broker
@@ -84,7 +94,7 @@ pub async fn serve(mut socket: WebSocket, config: SessionConfig) {
         return;
     }
 
-    run_authenticated(socket, connection, revocations, &config).await;
+    run_authenticated(socket, connection, revocations, client_id, &config).await;
 }
 
 async fn send_rejected(socket: &mut WebSocket) {
@@ -109,6 +119,7 @@ async fn receive_client(socket: &mut WebSocket) -> Option<ClientMessage> {
 fn handshake_response(
     authorization: Authorization,
     session_id: crate::broker::SessionId,
+    vapid_public_key: Bytes,
 ) -> ServerMessage {
     match authorization {
         Authorization::Paired {
@@ -120,10 +131,12 @@ fn handshake_response(
             client_id,
             credential,
             session_id,
+            vapid_public_key,
         },
-        Authorization::Authenticated { server_id } => ServerMessage::Authenticated {
+        Authorization::Authenticated { server_id, .. } => ServerMessage::Authenticated {
             server_id,
             session_id,
+            vapid_public_key,
         },
     }
 }
@@ -132,6 +145,7 @@ async fn run_authenticated(
     socket: WebSocket,
     mut connection: RemoteConnection,
     mut revocations: tokio::sync::watch::Receiver<u64>,
+    client_id: uuid::Uuid,
     config: &SessionConfig,
 ) {
     let session_id = connection.session_id;
@@ -164,7 +178,13 @@ async fn run_authenticated(
                     break;
                 };
 
-                if !handle_client_message(message, config, session_id, &mut awaiting_pong).await {
+                if !handle_client_message(
+                    message,
+                    config,
+                    session_id,
+                    client_id,
+                    &mut awaiting_pong,
+                ).await {
                     break;
                 }
             }
@@ -193,6 +213,7 @@ async fn handle_client_message(
     message: Message,
     config: &SessionConfig,
     session_id: crate::broker::SessionId,
+    client_id: uuid::Uuid,
     awaiting_pong: &mut bool,
 ) -> bool {
     let Message::Binary(frame) = message else {
@@ -219,7 +240,32 @@ async fn handle_client_message(
             *awaiting_pong = false;
             Ok(())
         }
-        ClientMessage::PairRequest { .. } | ClientMessage::Authenticate { .. } => return false,
+        ClientMessage::SetPushSubscription {
+            endpoint,
+            expiration_time,
+            p256_dh,
+            auth,
+        } => {
+            let subscription = PushSubscription {
+                endpoint,
+                expiration_time,
+                p256dh: p256_dh,
+                auth,
+            };
+            if let Err(error) = config
+                .pairing
+                .set_push_subscription(client_id, subscription)
+                .await
+            {
+                warn!(%error, "could not persist push subscription");
+                return false;
+            }
+
+            return true;
+        }
+        ClientMessage::PairRequest { .. } | ClientMessage::Authenticate { .. } => {
+            return false;
+        }
     };
 
     result.is_ok()

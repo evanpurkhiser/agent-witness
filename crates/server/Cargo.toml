@@ -12,6 +12,7 @@ embedded-ui = ["dep:mime_guess", "dep:rust-embed"]
 [dependencies]
 anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }
+base64 = "0.22"
 bytes = { version = "1", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 figment = { version = "0.10", features = ["toml"] }
@@ -20,6 +21,7 @@ getrandom = "0.4"
 humantime = "2"
 humantime-serde = "1"
 mime_guess = { version = "2", optional = true }
+p256 = { version = "0.13", default-features = false, features = ["arithmetic"] }
 rmp-serde = "1"
 rust-embed = { version = "8", optional = true }
 serde = { version = "1", features = ["derive"] }

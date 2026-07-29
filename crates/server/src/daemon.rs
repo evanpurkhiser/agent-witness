@@ -14,6 +14,7 @@ use crate::{
     broker::{BrokerConfig, BrokerHandle},
     config::Config,
     control::ControlSocket,
+    push::VapidKey,
     remote::{
         FilePairingStore, MemoryPairingStore, PairingService, PairingStore, SessionConfig,
         protocol::MAX_MESSAGE_OVERHEAD,
@@ -22,6 +23,7 @@ use crate::{
 };
 
 pub async fn run(config: Config) -> anyhow::Result<()> {
+    let vapid = VapidKey::open(config.vapid_private_key_file.clone()).await?;
     let pairing_store: Arc<dyn PairingStore> = match &config.state_path {
         Some(path) => Arc::new(FilePairingStore::new(path.clone())),
         None => {
@@ -56,6 +58,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         SessionConfig {
             broker: broker.clone(),
             pairing,
+            vapid_public_key: vapid.public_key(),
             remote_capacity: config.remote_capacity,
             shutdown: shutdown.clone(),
         },

@@ -37,6 +37,7 @@ async fn websocket_adapts_a_remote_worker_to_the_broker() {
         SessionConfig {
             broker: broker.clone(),
             pairing: pairing.clone(),
+            vapid_public_key: Bytes::from_static(&[4; 65]),
             remote_capacity: 1,
             shutdown: shutdown.clone(),
         },
@@ -61,6 +62,7 @@ async fn websocket_adapts_a_remote_worker_to_the_broker() {
         client_id,
         credential,
         session_id,
+        vapid_public_key,
     } = receive::<ServerMessage>(&mut remote).await
     else {
         panic!("expected a pairing response")
@@ -69,6 +71,18 @@ async fn websocket_adapts_a_remote_worker_to_the_broker() {
     assert!(Uuid::parse_str(&client_id).is_ok());
     assert!(Uuid::parse_str(&session_id).is_ok());
     assert_eq!(credential.len(), 32);
+    assert_eq!(vapid_public_key, Bytes::from_static(&[4; 65]));
+
+    send(
+        &mut remote,
+        ClientMessage::SetPushSubscription {
+            endpoint: "https://push.example.test/subscription".into(),
+            expiration_time: None,
+            p256_dh: "BGsX0fLhLEJH-Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU".into(),
+            auth: "AAECAwQFBgcICQoLDA0ODw".into(),
+        },
+    )
+    .await;
 
     let request_packet = Bytes::from_static(b"\0\0\0\x01\x0b");
     let response_packet = Bytes::from_static(b"\0\0\0\x01\x0c");
@@ -193,6 +207,12 @@ enum ClientMessage {
         attempt: u32,
         packet: Bytes,
     },
+    SetPushSubscription {
+        endpoint: String,
+        expiration_time: Option<u64>,
+        p256_dh: String,
+        auth: String,
+    },
 }
 
 #[derive(Deserialize)]
@@ -203,6 +223,7 @@ enum ServerMessage {
         client_id: String,
         credential: Bytes,
         session_id: String,
+        vapid_public_key: Bytes,
     },
     AgentRequest {
         request_id: String,

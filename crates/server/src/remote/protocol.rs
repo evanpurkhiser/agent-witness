@@ -1,4 +1,7 @@
+use axum::http::Uri;
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use bytes::Bytes;
+use p256::PublicKey;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 use uuid::Uuid;
@@ -8,9 +11,12 @@ use crate::broker::{RemoteCommand, RequestId, SessionId};
 const VERSION: u8 = 1;
 const MAX_LABEL_LENGTH: usize = 128;
 const MAX_CREDENTIAL_LENGTH: usize = 128;
+const MAX_PUSH_ENDPOINT_LENGTH: usize = 4096;
+const P256DH_LENGTH: usize = 65;
+const AUTH_SECRET_LENGTH: usize = 16;
 
-/// Reserved headroom for MessagePack field names and identifiers.
-pub const MAX_MESSAGE_OVERHEAD: usize = 1024;
+/// Reserved headroom for non-packet fields, including push registration.
+pub const MAX_MESSAGE_OVERHEAD: usize = 8 * 1024;
 
 /// Messages accepted from a remote client.
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -32,6 +38,12 @@ pub enum ClientMessage {
         attempt: u32,
         packet: Bytes,
     },
+    SetPushSubscription {
+        endpoint: String,
+        expiration_time: Option<u64>,
+        p256_dh: String,
+        auth: String,
+    },
     Pong,
 }
 
@@ -46,9 +58,47 @@ impl ClientMessage {
             {
                 Err(ProtocolError::InvalidMessage)
             }
+            Self::SetPushSubscription {
+                endpoint,
+                p256_dh,
+                auth,
+                ..
+            } if !valid_push_endpoint(endpoint)
+                || !valid_p256dh(p256_dh)
+                || !valid_auth_secret(auth) =>
+            {
+                Err(ProtocolError::InvalidMessage)
+            }
             _ => Ok(()),
         }
     }
+}
+
+fn valid_push_endpoint(endpoint: &str) -> bool {
+    if endpoint.is_empty() || endpoint.len() > MAX_PUSH_ENDPOINT_LENGTH {
+        return false;
+    }
+
+    endpoint
+        .parse::<Uri>()
+        .is_ok_and(|uri| uri.scheme_str() == Some("https") && uri.authority().is_some())
+}
+
+fn valid_p256dh(value: &str) -> bool {
+    if value.len() > 128 {
+        return false;
+    }
+
+    URL_SAFE_NO_PAD.decode(value).is_ok_and(|bytes| {
+        bytes.len() == P256DH_LENGTH && PublicKey::from_sec1_bytes(&bytes).is_ok()
+    })
+}
+
+fn valid_auth_secret(value: &str) -> bool {
+    value.len() <= 64
+        && URL_SAFE_NO_PAD
+            .decode(value)
+            .is_ok_and(|bytes| bytes.len() == AUTH_SECRET_LENGTH)
 }
 
 /// Messages sent to a remote client.
@@ -63,12 +113,14 @@ pub enum ServerMessage {
         credential: Bytes,
         #[serde(with = "uuid::serde::hyphenated")]
         session_id: SessionId,
+        vapid_public_key: Bytes,
     },
     Authenticated {
         #[serde(with = "uuid::serde::hyphenated")]
         server_id: Uuid,
         #[serde(with = "uuid::serde::hyphenated")]
         session_id: SessionId,
+        vapid_public_key: Bytes,
     },
     Rejected,
     AgentRequest {
@@ -167,6 +219,10 @@ mod tests {
 
     use super::{ClientMessage, ProtocolError, decode_client, encode};
 
+    const P256DH: &str =
+        "BGsX0fLhLEJH-Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU";
+    const AUTH: &str = "AAECAwQFBgcICQoLDA0ODw";
+
     #[test]
     fn round_trips_pair_request() {
         let frame = encode(ClientMessage::PairRequest {
@@ -218,6 +274,48 @@ mod tests {
                 packet: Bytes::from_static(b"\0\0\0\x01\x06"),
             }
         );
+    }
+
+    #[test]
+    fn round_trips_a_valid_push_subscription() {
+        let message = ClientMessage::SetPushSubscription {
+            endpoint: "https://push.example.test/subscription".into(),
+            expiration_time: Some(1_800_000_000_000),
+            p256_dh: P256DH.into(),
+            auth: AUTH.into(),
+        };
+        let frame = encode(&message).unwrap();
+
+        assert_eq!(decode_client(frame).unwrap(), message);
+    }
+
+    #[test]
+    fn rejects_invalid_push_subscription_fields() {
+        for message in [
+            ClientMessage::SetPushSubscription {
+                endpoint: "http://push.example.test/subscription".into(),
+                expiration_time: None,
+                p256_dh: P256DH.into(),
+                auth: AUTH.into(),
+            },
+            ClientMessage::SetPushSubscription {
+                endpoint: "https://push.example.test/subscription".into(),
+                expiration_time: None,
+                p256_dh: "not-a-public-key".into(),
+                auth: AUTH.into(),
+            },
+            ClientMessage::SetPushSubscription {
+                endpoint: "https://push.example.test/subscription".into(),
+                expiration_time: None,
+                p256_dh: P256DH.into(),
+                auth: "not-an-auth-secret".into(),
+            },
+        ] {
+            assert!(matches!(
+                decode_client(encode(message).unwrap()),
+                Err(ProtocolError::InvalidMessage)
+            ));
+        }
     }
 
     #[test]
