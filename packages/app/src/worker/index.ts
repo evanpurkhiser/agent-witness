@@ -100,8 +100,8 @@ class WorkerSession implements WorkerApi {
     return this.#snapshot();
   }
 
-  disconnect(): Promise<WorkerSnapshot> {
-    this.#remote.disconnect();
+  setConnectionActive(active: boolean): Promise<WorkerSnapshot> {
+    this.#remote.setActive(active);
     return this.#snapshot();
   }
 

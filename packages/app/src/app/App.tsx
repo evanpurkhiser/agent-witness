@@ -9,8 +9,6 @@ export function App() {
     working,
     createVault,
     unlock,
-    connect,
-    disconnect,
     forgetPairing,
     lock,
     destroy,
@@ -58,19 +56,6 @@ export function App() {
             </>
           )}
         </dl>
-        {connection.status === 'connected' ? (
-          <button type="button" disabled={working} onClick={disconnect}>
-            Disconnect
-          </button>
-        ) : (
-          <button
-            type="button"
-            disabled={working || connection.status === 'connecting'}
-            onClick={connect}
-          >
-            {connection.status === 'connecting' ? 'Connecting…' : 'Connect'}
-          </button>
-        )}
         {connection.status === 'rejected' && (
           <button type="button" disabled={working} onClick={forgetPairing}>
             Forget pairing and reconnect

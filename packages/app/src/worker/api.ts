@@ -77,9 +77,9 @@ export interface WorkerApi {
    */
   connect(endpoint: string, label: string): Promise<WorkerSnapshot>;
   /**
-   * Close the active WebSocket connection.
+   * Reconcile the desired connection with page visibility and network state.
    */
-  disconnect(): Promise<WorkerSnapshot>;
+  setConnectionActive(active: boolean): Promise<WorkerSnapshot>;
   /**
    * Remove the stored credential for one server without changing the vault.
    */

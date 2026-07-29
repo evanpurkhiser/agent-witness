@@ -40,6 +40,14 @@ export function useWorker() {
 
   useEffect(() => {
     let active = true;
+    const reconcileConnection = () => {
+      void worker.setConnectionActive(
+        document.visibilityState === 'visible' && navigator.onLine,
+      );
+    };
+    const pauseConnection = () => {
+      void worker.setConnectionActive(false);
+    };
     const listener = Comlink.proxy((next: WorkerSnapshot) => {
       if (active) {
         setSnapshot(next);
@@ -57,13 +65,24 @@ export function useWorker() {
         const connected = await worker.connect(websocketEndpoint(), 'Browser');
         if (active) {
           setSnapshot(connected);
+          reconcileConnection();
         }
       })
       .catch(reportError);
 
+    document.addEventListener('visibilitychange', reconcileConnection);
+    window.addEventListener('pagehide', pauseConnection);
+    window.addEventListener('pageshow', reconcileConnection);
+    window.addEventListener('online', reconcileConnection);
+    window.addEventListener('offline', reconcileConnection);
+
     return () => {
       active = false;
-      void worker.disconnect();
+      document.removeEventListener('visibilitychange', reconcileConnection);
+      window.removeEventListener('pagehide', pauseConnection);
+      window.removeEventListener('pageshow', reconcileConnection);
+      window.removeEventListener('online', reconcileConnection);
+      window.removeEventListener('offline', reconcileConnection);
     };
   }, [reportError]);
 
@@ -86,17 +105,11 @@ export function useWorker() {
     [run],
   );
 
-  const connect = useCallback(
-    () => run(() => worker.connect(websocketEndpoint(), 'Browser')),
-    [run],
-  );
-  const disconnect = useCallback(() => run(() => worker.disconnect()), [run]);
   const forgetPairing = useCallback(
     () =>
-      run(async () => {
+      run(() => {
         const endpoint = websocketEndpoint();
-        await worker.forgetPairing(endpoint);
-        return worker.connect(endpoint, 'Browser');
+        return worker.forgetPairing(endpoint);
       }),
     [run],
   );
@@ -114,8 +127,6 @@ export function useWorker() {
     working,
     createVault,
     unlock,
-    connect,
-    disconnect,
     forgetPairing,
     lock,
     destroy,

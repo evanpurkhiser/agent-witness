@@ -19,6 +19,11 @@ import {
 const MAX_PENDING_REQUESTS = 32;
 
 /**
+ * Delay between connection attempts while the page is active.
+ */
+const RETRY_INTERVAL_MS = 2_000;
+
+/**
  * Durable credentials and server identity established by pairing an endpoint.
  */
 export interface PairingRecord {
@@ -45,7 +50,7 @@ export interface PairingStore {
  * Display-safe connection state published to page code.
  */
 export interface ConnectionSnapshot {
-  status: 'disconnected' | 'connecting' | 'connected' | 'rejected' | 'error';
+  status: 'connecting' | 'connected' | 'reconnecting' | 'rejected' | 'error';
   serverId: string | null;
   sessionId: string | null;
   pendingRequests: number;
@@ -82,12 +87,20 @@ export class RemoteSession {
 
   #socket: WebSocket | null = null;
 
+  #endpoint: string | null = null;
+
+  #label: string | null = null;
+
   #pairing: PairingRecord | null = null;
 
   #ready = false;
 
+  #active = true;
+
+  #retryTimer: ReturnType<typeof setTimeout> | null = null;
+
   /**
-   * Invalidates async connection work when a newer connect or disconnect wins.
+   * Invalidates async connection work when a newer lifecycle decision wins.
    */
   #generation = 0;
 
@@ -102,7 +115,7 @@ export class RemoteSession {
   #pending = new Map<string, PendingRequest>();
 
   #snapshot: ConnectionSnapshot = {
-    status: 'disconnected',
+    status: 'connecting',
     serverId: null,
     sessionId: null,
     pendingRequests: 0,
@@ -129,13 +142,14 @@ export class RemoteSession {
   }
 
   /**
-   * Replace any active connection and pair or authenticate with an endpoint.
+   * Start and permanently remember the desired connection.
    */
   async connect(endpoint: string, label: string): Promise<void> {
-    this.disconnect();
-
-    const normalized = new URL(endpoint).href;
-    const generation = ++this.#generation;
+    this.#endpoint = new URL(endpoint).href;
+    this.#label = label;
+    this.#active = true;
+    this.#stopRetry();
+    this.#closeSocket();
     this.#setSnapshot({
       status: 'connecting',
       serverId: null,
@@ -143,15 +157,64 @@ export class RemoteSession {
       error: null,
     });
 
+    await this.#open();
+  }
+
+  /**
+   * Reconcile the desired connection with page visibility and network state.
+   */
+  setActive(active: boolean): void {
+    this.#active = active;
+    this.#stopRetry();
+
+    if (this.#snapshot.status === 'rejected' || this.#snapshot.status === 'error') {
+      return;
+    }
+
+    if (!active) {
+      this.#closeSocket();
+      this.#setSnapshot({
+        status: 'reconnecting',
+        serverId: null,
+        sessionId: null,
+        error: null,
+      });
+      return;
+    }
+
+    if (this.#socket) {
+      return;
+    }
+
+    this.#setSnapshot({
+      status: 'reconnecting',
+      serverId: null,
+      sessionId: null,
+      error: null,
+    });
+    void this.#open();
+  }
+
+  /**
+   * Open one socket unless another attempt or connection already owns the session.
+   */
+  async #open(): Promise<void> {
+    const endpoint = this.#endpoint;
+    const label = this.#label;
+    if (!this.#active || !endpoint || label === null || this.#socket) {
+      return;
+    }
+
+    const generation = ++this.#generation;
     let pairing: PairingRecord | null;
     let socket: WebSocket;
     try {
-      pairing = await this.#pairingStore.loadPairing(normalized);
-      if (generation !== this.#generation) {
+      pairing = await this.#pairingStore.loadPairing(endpoint);
+      if (generation !== this.#generation || !this.#active || this.#socket) {
         return;
       }
 
-      socket = this.#createSocket(normalized);
+      socket = this.#createSocket(endpoint);
     } catch (cause) {
       if (generation === this.#generation) {
         this.#setSnapshot({
@@ -161,7 +224,7 @@ export class RemoteSession {
           error: cause instanceof Error ? cause.message : String(cause),
         });
       }
-      throw cause;
+      return;
     }
 
     this.#pairing = pairing;
@@ -189,28 +252,20 @@ export class RemoteSession {
         .then(() => this.#receiveMessage(socket, event.data, label))
         .catch(cause => this.#fail(socket, cause));
     });
-    socket.addEventListener('error', () =>
-      this.#fail(socket, new Error('WebSocket connection failed')),
-    );
+    socket.addEventListener('error', () => this.#connectionLost(socket));
     socket.addEventListener('close', () => this.#closed(socket));
   }
 
   /**
-   * Close the active socket and discard all connection-scoped state.
+   * Close the active socket and discard connection-scoped state.
    */
-  disconnect(): void {
+  #closeSocket(): void {
     ++this.#generation;
     const socket = this.#socket;
     const wasConnected = this.#snapshot.status === 'connected';
     this.#socket = null;
     this.#pairing = null;
     this.#clearPending();
-    this.#setSnapshot({
-      status: 'disconnected',
-      serverId: null,
-      sessionId: null,
-      error: null,
-    });
     socket?.close();
 
     if (wasConnected) {
@@ -223,8 +278,18 @@ export class RemoteSession {
    */
   async forgetPairing(endpoint: string): Promise<void> {
     const normalized = new URL(endpoint).href;
-    this.disconnect();
+    this.#stopRetry();
+    this.#closeSocket();
+    this.#setSnapshot({
+      status: 'reconnecting',
+      serverId: null,
+      sessionId: null,
+      error: null,
+    });
     await this.#pairingStore.deletePairing(normalized);
+    if (normalized === this.#endpoint && this.#active) {
+      await this.#open();
+    }
   }
 
   /**
@@ -256,7 +321,10 @@ export class RemoteSession {
     }
 
     const message = decodeServerMessage(new Uint8Array(data));
-    if (this.#snapshot.status === 'connecting') {
+    if (
+      this.#snapshot.status === 'connecting' ||
+      this.#snapshot.status === 'reconnecting'
+    ) {
       await this.#handshake(socket, message, label);
       return;
     }
@@ -331,13 +399,6 @@ export class RemoteSession {
     }
 
     throw new Error('expected a handshake response');
-  }
-
-  /**
-   * Return the normalized endpoint reported by the active socket.
-   */
-  get #endpoint(): string | null {
-    return this.#socket?.url ?? null;
   }
 
   /**
@@ -434,9 +495,14 @@ export class RemoteSession {
   }
 
   /**
-   * Convert an unexpected transport failure into an error state.
+   * Convert an unexpected failure into a transport retry or terminal error.
    */
   #fail(socket: WebSocket, cause: unknown): void {
+    if (socket.readyState !== WebSocket.OPEN) {
+      this.#connectionLost(socket);
+      return;
+    }
+
     const message = cause instanceof Error ? cause.message : String(cause);
     this.#finish(socket, 'error', message);
   }
@@ -451,6 +517,7 @@ export class RemoteSession {
 
     const wasConnected = this.#snapshot.status === 'connected';
     this.#socket = null;
+    this.#stopRetry();
     this.#clearPending();
     this.#setSnapshot({
       status,
@@ -469,6 +536,13 @@ export class RemoteSession {
    * Handle a peer-initiated close without affecting a replacement socket.
    */
   #closed(socket: WebSocket): void {
+    this.#connectionLost(socket);
+  }
+
+  /**
+   * Reconcile a failed transport and keep trying while the page is active.
+   */
+  #connectionLost(socket: WebSocket): void {
     if (socket !== this.#socket) {
       return;
     }
@@ -477,15 +551,44 @@ export class RemoteSession {
     this.#socket = null;
     this.#clearPending();
     this.#setSnapshot({
-      status: 'disconnected',
+      status: 'reconnecting',
       serverId: null,
       sessionId: null,
       error: null,
     });
+    socket.close();
 
     if (wasConnected) {
       this.#onDisconnect();
     }
+
+    this.#scheduleRetry();
+  }
+
+  /**
+   * Keep one fixed-delay retry pending for an active session.
+   */
+  #scheduleRetry(): void {
+    if (!this.#active || this.#retryTimer || !this.#endpoint) {
+      return;
+    }
+
+    this.#retryTimer = setTimeout(() => {
+      this.#retryTimer = null;
+      void this.#open();
+    }, RETRY_INTERVAL_MS);
+  }
+
+  /**
+   * Cancel a delayed attempt when lifecycle state permits an immediate decision.
+   */
+  #stopRetry(): void {
+    if (!this.#retryTimer) {
+      return;
+    }
+
+    clearTimeout(this.#retryTimer);
+    this.#retryTimer = null;
   }
 
   /**

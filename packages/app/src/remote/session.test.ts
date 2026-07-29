@@ -72,10 +72,14 @@ describe('RemoteSession', () => {
     socket.receive({type: 'rejected'});
     await settle();
 
+    session.setActive(false);
+    session.setActive(true);
+    expect(session.snapshot().status).toBe('rejected');
+
     await session.forgetPairing(ENDPOINT);
 
     expect(await store.loadPairing(ENDPOINT)).toBeNull();
-    expect(session.snapshot().status).toBe('disconnected');
+    expect(session.snapshot().status).toBe('reconnecting');
   });
 
   it('buffers requests while locked and drains them after unlock', async () => {
@@ -168,6 +172,77 @@ describe('RemoteSession', () => {
 
     expect(sentMessages(socket).at(-1)).toEqual({type: 'pong'});
   });
+
+  it('closes while inactive and reconnects immediately when reactivated', async () => {
+    const store = new MemoryPairingStore(pairing());
+    const sockets: FakeSocket[] = [];
+    const onDisconnect = vi.fn();
+    const session = new RemoteSession({
+      pairingStore: store,
+      handleRequest: () => Promise.resolve(bytes(0, 0, 0, 1, 5)),
+      onChange() {},
+      onDisconnect,
+      createSocket: endpoint => {
+        const socket = new FakeSocket(endpoint);
+        sockets.push(socket);
+        return socket as unknown as WebSocket;
+      },
+    });
+
+    await session.connect(ENDPOINT, 'Browser');
+    sockets[0]!.open();
+    sockets[0]!.receive({
+      type: 'authenticated',
+      server_id: SERVER_ID,
+      session_id: SESSION_ID,
+    });
+    await settle();
+
+    session.setActive(false);
+
+    expect(session.snapshot().status).toBe('reconnecting');
+    expect(sockets[0]!.readyState).toBe(WebSocket.CLOSED);
+    expect(onDisconnect).toHaveBeenCalledOnce();
+
+    session.setActive(true);
+    await settle();
+
+    expect(sockets).toHaveLength(2);
+    expect(session.snapshot().status).toBe('reconnecting');
+  });
+
+  it('keeps retrying transport failures with only one pending retry', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const sockets: FakeSocket[] = [];
+      const session = new RemoteSession({
+        pairingStore: new MemoryPairingStore(pairing()),
+        handleRequest: () => Promise.resolve(bytes(0, 0, 0, 1, 5)),
+        onChange() {},
+        onDisconnect() {},
+        createSocket: endpoint => {
+          const socket = new FakeSocket(endpoint);
+          sockets.push(socket);
+          return socket as unknown as WebSocket;
+        },
+      });
+
+      await session.connect(ENDPOINT, 'Browser');
+      sockets[0]!.fail();
+
+      expect(session.snapshot().status).toBe('reconnecting');
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(sockets).toHaveLength(2);
+
+      sockets[1]!.fail();
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(sockets).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 async function connectSession({
@@ -179,16 +254,21 @@ async function connectSession({
   ready?: boolean;
   handleRequest?: (packet: Bytes) => Promise<Bytes>;
 }): Promise<{session: RemoteSession; socket: FakeSocket}> {
-  const socket = new FakeSocket(ENDPOINT);
+  const sockets: FakeSocket[] = [];
   const session = new RemoteSession({
     pairingStore: store,
     handleRequest,
     onChange() {},
     onDisconnect() {},
-    createSocket: () => socket as unknown as WebSocket,
+    createSocket: endpoint => {
+      const socket = new FakeSocket(endpoint);
+      sockets.push(socket);
+      return socket as unknown as WebSocket;
+    },
   });
   session.setReady(ready);
   await session.connect(ENDPOINT, 'Browser');
+  const socket = sockets[0]!;
   socket.open();
   return {session, socket};
 }
@@ -220,6 +300,13 @@ class FakeSocket extends EventTarget {
 
   send(data: Bytes): void {
     this.sent.push(data);
+  }
+
+  fail(): void {
+    this.readyState = WebSocket.CLOSING;
+    this.dispatchEvent(new Event('error'));
+    this.readyState = WebSocket.CLOSED;
+    this.dispatchEvent(new CloseEvent('close'));
   }
 
   close(): void {
