@@ -1,5 +1,6 @@
 import {type FormEvent, useState} from 'react';
 
+import {useServiceWorker} from './use-service-worker';
 import {useWorker, WorkerProvider} from './WorkerProvider';
 
 export function InstalledApp() {
@@ -23,6 +24,13 @@ function InstalledAppContent() {
     addKey,
     removeKey,
   } = useWorker();
+  const {
+    error: pushError,
+    working: pushWorking,
+    enablePushNotifications,
+    pushRegistrationReady,
+    pushRegistered,
+  } = useServiceWorker();
   const [pem, setPem] = useState('');
 
   async function submitKey(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -68,6 +76,25 @@ function InstalledAppContent() {
           <button type="button" disabled={working} onClick={forgetPairing}>
             Forget pairing and reconnect
           </button>
+        )}
+      </section>
+
+      <section aria-labelledby="notifications-heading">
+        <h2 id="notifications-heading">Notifications</h2>
+        {pushError && <p role="alert">{pushError}</p>}
+        {pushRegistered ? (
+          <p>Notifications enabled.</p>
+        ) : (
+          <>
+            <p>Enable notifications for new SSH authentication requests.</p>
+            <button
+              type="button"
+              disabled={working || pushWorking || !pushRegistrationReady}
+              onClick={enablePushNotifications}
+            >
+              Enable notifications
+            </button>
+          </>
         )}
       </section>
 

@@ -44,6 +44,16 @@ export interface PairingStore {
   deletePairing(endpoint: string): Promise<void>;
 }
 
+/**
+ * Browser push-service values sent through an authenticated remote session.
+ */
+export interface PushSubscriptionRegistration {
+  endpoint: string;
+  expirationTime: number | null;
+  p256Dh: string;
+  auth: string;
+}
+
 // REVIEW: Make this a discriminated union so status-specific fields do not
 // require null placeholders.
 /**
@@ -313,6 +323,18 @@ export class RemoteSession {
     if (ready) {
       this.#drain(socket);
     }
+  }
+
+  /**
+   * Register or replace this paired client's Web Push subscription.
+   */
+  registerPushSubscription(subscription: PushSubscriptionRegistration): void {
+    const socket = this.#socket;
+    if (!socket || this.#snapshot.status !== 'connected') {
+      throw new Error('remote session is not connected');
+    }
+
+    this.#send(socket, {type: 'set_push_subscription', ...subscription});
   }
 
   /**

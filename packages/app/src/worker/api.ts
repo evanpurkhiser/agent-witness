@@ -2,7 +2,7 @@
 // secret-free views it returns. The typestate vault lives inside the worker;
 // the page only ever sees these snapshots.
 
-import type {ConnectionSnapshot} from 'app/remote/session';
+import type {ConnectionSnapshot, PushSubscriptionRegistration} from 'app/remote/session';
 import type {Bytes} from 'app/utils/bytes';
 import type {KeyType, Vault} from 'app/vault/types';
 import type {CreateVaultParams, VaultState} from 'app/vault/vault';
@@ -84,6 +84,12 @@ export interface WorkerApi {
    * Remove the stored credential for one server without changing the vault.
    */
   forgetPairing(endpoint: string): Promise<WorkerSnapshot>;
+  /**
+   * Send the browser's current push subscription to the paired server.
+   */
+  registerPushSubscription(
+    subscription: PushSubscriptionRegistration,
+  ): Promise<WorkerSnapshot>;
   /**
    * Create the vault from a passkey's PRF material, leaving it unlocked.
    */

@@ -10,6 +10,7 @@ import {
 
 import * as Comlink from 'comlink';
 
+import type {PushSubscriptionRegistration} from 'app/remote/session';
 import {authenticatePasskey, registerPasskey} from 'app/webauthn';
 import type {VaultView, WorkerApi, WorkerSnapshot} from 'app/worker/api';
 
@@ -23,13 +24,14 @@ interface WorkerContextValue {
   snapshot: WorkerSnapshot | null;
   error: string | null;
   working: boolean;
-  createVault(): Promise<void>;
-  unlock(view: VaultView): Promise<void>;
-  forgetPairing(): Promise<void>;
-  lock(): Promise<void>;
-  destroy(): Promise<void>;
-  addKey(pem: string): Promise<void>;
-  removeKey(keyId: string): Promise<void>;
+  createVault(): Promise<boolean>;
+  unlock(view: VaultView): Promise<boolean>;
+  forgetPairing(): Promise<boolean>;
+  registerPushSubscription(subscription: PushSubscriptionRegistration): Promise<boolean>;
+  lock(): Promise<boolean>;
+  destroy(): Promise<boolean>;
+  addKey(pem: string): Promise<boolean>;
+  removeKey(keyId: string): Promise<boolean>;
 }
 
 const WorkerContext = createContext<WorkerContextValue | null>(null);
@@ -44,13 +46,15 @@ export function WorkerProvider({children}: {children: ReactNode}) {
   }, []);
 
   const run = useCallback(
-    async (action: WorkerAction): Promise<void> => {
+    async (action: WorkerAction): Promise<boolean> => {
       setError(null);
       setWorking(true);
       try {
         setSnapshot(await action());
+        return true;
       } catch (cause) {
         reportError(cause);
+        return false;
       } finally {
         setWorking(false);
       }
@@ -133,6 +137,11 @@ export function WorkerProvider({children}: {children: ReactNode}) {
       }),
     [run],
   );
+  const registerPushSubscription = useCallback(
+    (subscription: PushSubscriptionRegistration) =>
+      run(() => worker.registerPushSubscription(subscription)),
+    [run],
+  );
   const lock = useCallback(() => run(() => worker.lock()), [run]);
   const destroy = useCallback(() => run(() => worker.destroy()), [run]);
   const addKey = useCallback((pem: string) => run(() => worker.addKey(pem)), [run]);
@@ -149,6 +158,7 @@ export function WorkerProvider({children}: {children: ReactNode}) {
       createVault,
       unlock,
       forgetPairing,
+      registerPushSubscription,
       lock,
       destroy,
       addKey,
@@ -161,6 +171,7 @@ export function WorkerProvider({children}: {children: ReactNode}) {
       createVault,
       unlock,
       forgetPairing,
+      registerPushSubscription,
       lock,
       destroy,
       addKey,

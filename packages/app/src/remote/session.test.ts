@@ -11,6 +11,9 @@ const SESSION_ID = '12345678-9abc-4def-8123-456789abcdef';
 const REQUEST_ID = '99999999-8888-4777-8666-555555555555';
 const ENDPOINT = 'ws://localhost/api/agent';
 const VAPID_PUBLIC_KEY = bytes(4, ...Array.from({length: 64}, () => 1));
+const P256_DH =
+  'BGsX0fLhLEJH-Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT-NC4v4af5uO5-tKfA-eFivOM1drMV7Oy7ZAaDe_UfU';
+const AUTH = 'AAECAwQFBgcICQoLDA0ODw';
 
 describe('RemoteSession', () => {
   it('pairs a new client, persists its credential, and reports locked', async () => {
@@ -182,6 +185,34 @@ describe('RemoteSession', () => {
     await settle();
 
     expect(sentMessages(socket).at(-1)).toEqual({type: 'pong'});
+  });
+
+  it('sends a push subscription through an authenticated session', async () => {
+    const {session, socket} = await connectSession({
+      store: new MemoryPairingStore(pairing()),
+    });
+    socket.receive({
+      type: 'authenticated',
+      server_id: SERVER_ID,
+      session_id: SESSION_ID,
+      vapid_public_key: VAPID_PUBLIC_KEY,
+    });
+    await settle();
+
+    session.registerPushSubscription({
+      endpoint: 'https://push.example.test/subscription',
+      expirationTime: null,
+      p256Dh: P256_DH,
+      auth: AUTH,
+    });
+
+    expect(sentMessages(socket).at(-1)).toEqual({
+      type: 'set_push_subscription',
+      endpoint: 'https://push.example.test/subscription',
+      expiration_time: null,
+      p256_dh: P256_DH,
+      auth: AUTH,
+    });
   });
 
   it('closes while inactive and reconnects immediately when reactivated', async () => {

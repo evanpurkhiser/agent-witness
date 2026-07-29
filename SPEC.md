@@ -24,14 +24,16 @@ can clear pairing and revoke an active remote session.
 
 **Implemented (live client):** the dedicated worker's WebSocket session,
 pairing credential storage, locked request buffering, cancellation, signing
-over the wire, and embedded production frontend assets.
+over the wire, notification subscription UI, push-subscription registration
+through the authenticated worker session, a notification service worker, and
+embedded production frontend assets.
 
 **Partially implemented:** the server persists a VAPID private key, includes its
 derived public key in successful remote handshakes, and accepts, validates, and
 durably stores an authenticated client's push subscription.
 
-**Not yet implemented (still as designed below):** the service worker, browser
-subscription flow, push delivery, and the control socket's status and statistics
+**Not yet implemented (still as designed below):** push delivery, static asset
+caching in the service worker, and the control socket's status and statistics
 commands.
 
 Note: there is **no Rust/WASM on the client**. A spike proved a hand-rolled
@@ -139,6 +141,8 @@ Owns everything that requires a visible, foreground browser context.
 - Gate initial setup on installed standalone display mode
 - Display installation instructions before starting the dedicated Web Worker
 - Register the service worker
+- Request notification permission from a user gesture
+- Send the resulting push subscription to the dedicated worker
 - Start and stop the dedicated Web Worker
 - Invoke WebAuthn and request the PRF output
 - Display pending SSH authentication requests
@@ -214,6 +218,7 @@ signing live — in TypeScript over WebCrypto, not in WASM.
 - Derive the wrapping key and unlock the vault (recover the master key)
 - Hold unlocked keys as non-extractable `CryptoKey`s
 - Open and maintain the WebSocket
+- Register the browser's push subscription with the paired server
 - Receive remote agent messages
 - Buffer a bounded number of agent requests in memory while the vault is locked
 - Implement the ssh-agent protocol and produce signatures via WebCrypto

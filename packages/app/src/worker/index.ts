@@ -4,7 +4,7 @@
 
 import * as Comlink from 'comlink';
 
-import {RemoteSession} from 'app/remote/session';
+import {RemoteSession, type PushSubscriptionRegistration} from 'app/remote/session';
 import {handleAgentRequest, readFrame} from 'app/ssh/agent';
 import type {Bytes} from 'app/utils/bytes';
 import {openVaultStore, type VaultStore} from 'app/vault/storage';
@@ -107,6 +107,13 @@ class WorkerSession implements WorkerApi {
 
   async forgetPairing(endpoint: string): Promise<WorkerSnapshot> {
     await this.#remote.forgetPairing(endpoint);
+    return this.#snapshot();
+  }
+
+  registerPushSubscription(
+    subscription: PushSubscriptionRegistration,
+  ): Promise<WorkerSnapshot> {
+    this.#remote.registerPushSubscription(subscription);
     return this.#snapshot();
   }
 
