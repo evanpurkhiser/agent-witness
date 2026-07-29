@@ -12,10 +12,15 @@ import {
   type ServerMessage,
 } from './protocol';
 
-// REVIEW: Needs a comment
+/**
+ * Bound queued requests so a locked or unattended agent cannot consume
+ * unbounded worker memory.
+ */
 const MAX_PENDING_REQUESTS = 32;
 
-// REVIEW: Lets add jsdoc style comments above all the interfaces here.
+/**
+ * Durable credentials and server identity established by pairing an endpoint.
+ */
 export interface PairingRecord {
   endpoint: string;
   serverId: string;
@@ -25,13 +30,20 @@ export interface PairingRecord {
   pairedAt: number;
 }
 
+/**
+ * Persistence operations required by a remote session's pairing lifecycle.
+ */
 export interface PairingStore {
   loadPairing(endpoint: string): Promise<PairingRecord | null>;
   savePairing(pairing: PairingRecord): Promise<void>;
   deletePairing(endpoint: string): Promise<void>;
 }
 
-// REVIEW: Think we could make this discriminate based on status? then we wouldn't need the nulls right?
+// REVIEW: Make this a discriminated union so status-specific fields do not
+// require null placeholders.
+/**
+ * Display-safe connection state published to page code.
+ */
 export interface ConnectionSnapshot {
   status: 'disconnected' | 'connecting' | 'connected' | 'rejected' | 'error';
   serverId: string | null;
@@ -40,6 +52,9 @@ export interface ConnectionSnapshot {
   error: string | null;
 }
 
+/**
+ * Transport dependencies and worker callbacks for a remote session.
+ */
 export interface RemoteSessionOptions {
   pairingStore: PairingStore;
   handleRequest(packet: Bytes): Promise<Bytes>;
@@ -48,11 +63,12 @@ export interface RemoteSessionOptions {
   createSocket?: (endpoint: string) => WebSocket;
 }
 
+/**
+ * A decoded agent request and whether its response is currently being produced.
+ */
 type PendingRequest = Extract<ServerMessage, {type: 'agent_request'}> & {
   processing: boolean;
 };
-
-// REVIEW: Let's add jsdoc comment sto all the methosd on the remote session
 
 /**
  * One browser worker's connection to one agent-witness server.
@@ -70,13 +86,19 @@ export class RemoteSession {
 
   #ready = false;
 
-  // REVIEW: Lets add a JSDoc comment on what the generation is used for
+  /**
+   * Invalidates async connection work when a newer connect or disconnect wins.
+   */
   #generation = 0;
 
-  // REVIEW: Definitely needs a comment, probably should be called `receiving`
-  #receive = Promise.resolve();
+  /**
+   * Serializes inbound messages so async handshakes preserve wire order.
+   */
+  #receiving = Promise.resolve();
 
-  // REVIEW: Needs comment
+  /**
+   * Requests awaiting or undergoing handling, keyed by request id and attempt.
+   */
   #pending = new Map<string, PendingRequest>();
 
   #snapshot: ConnectionSnapshot = {
@@ -87,6 +109,10 @@ export class RemoteSession {
     error: null,
   };
 
+  /**
+   * Create a session around its persistence, request handling, and lifecycle
+   * dependencies.
+   */
   constructor(options: RemoteSessionOptions) {
     this.#pairingStore = options.pairingStore;
     this.#handleRequest = options.handleRequest;
@@ -95,10 +121,16 @@ export class RemoteSession {
     this.#createSocket = options.createSocket ?? (endpoint => new WebSocket(endpoint));
   }
 
+  /**
+   * Return a copy of the latest display-safe connection state.
+   */
   snapshot(): ConnectionSnapshot {
     return {...this.#snapshot};
   }
 
+  /**
+   * Replace any active connection and pair or authenticate with an endpoint.
+   */
   async connect(endpoint: string, label: string): Promise<void> {
     this.disconnect();
 
@@ -153,7 +185,7 @@ export class RemoteSession {
       }
     });
     socket.addEventListener('message', event => {
-      this.#receive = this.#receive
+      this.#receiving = this.#receiving
         .then(() => this.#receiveMessage(socket, event.data, label))
         .catch(cause => this.#fail(socket, cause));
     });
@@ -163,6 +195,9 @@ export class RemoteSession {
     socket.addEventListener('close', () => this.#closed(socket));
   }
 
+  /**
+   * Close the active socket and discard all connection-scoped state.
+   */
   disconnect(): void {
     ++this.#generation;
     const socket = this.#socket;
@@ -183,12 +218,18 @@ export class RemoteSession {
     }
   }
 
+  /**
+   * Disconnect and remove the credential stored for an endpoint.
+   */
   async forgetPairing(endpoint: string): Promise<void> {
     const normalized = new URL(endpoint).href;
     this.disconnect();
     await this.#pairingStore.deletePairing(normalized);
   }
 
+  /**
+   * Publish agent availability and attempt buffered requests when unlocked.
+   */
   setReady(ready: boolean): void {
     this.#ready = ready;
     const socket = this.#socket;
@@ -202,6 +243,9 @@ export class RemoteSession {
     }
   }
 
+  /**
+   * Decode and route one message after all earlier messages have settled.
+   */
   async #receiveMessage(socket: WebSocket, data: unknown, label: string): Promise<void> {
     if (socket !== this.#socket) {
       return;
@@ -237,6 +281,9 @@ export class RemoteSession {
     }
   }
 
+  /**
+   * Complete pairing or authentication for a connecting socket.
+   */
   async #handshake(
     socket: WebSocket,
     message: ServerMessage,
@@ -286,10 +333,16 @@ export class RemoteSession {
     throw new Error('expected a handshake response');
   }
 
+  /**
+   * Return the normalized endpoint reported by the active socket.
+   */
   get #endpoint(): string | null {
     return this.#socket?.url ?? null;
   }
 
+  /**
+   * Publish an authenticated connection and offer pending work for processing.
+   */
   #connected(socket: WebSocket, serverId: string, sessionId: string): void {
     this.#setSnapshot({
       status: 'connected',
@@ -301,6 +354,9 @@ export class RemoteSession {
     this.#drain(socket);
   }
 
+  /**
+   * Buffer a unique request and attempt it immediately when the agent is ready.
+   */
   #enqueue(
     socket: WebSocket,
     message: Extract<ServerMessage, {type: 'agent_request'}>,
@@ -322,16 +378,25 @@ export class RemoteSession {
     this.#tryProcess(socket, key);
   }
 
+  /**
+   * Remove a buffered request or suppress its in-flight response.
+   */
   #cancel(requestId: string, attempt: number): void {
     if (this.#pending.delete(requestKey(requestId, attempt))) {
       this.#pendingChanged();
     }
   }
 
+  /**
+   * Offer every pending request for processing.
+   */
   #drain(socket: WebSocket): void {
     this.#pending.forEach((_pending, key) => this.#tryProcess(socket, key));
   }
 
+  /**
+   * Start a request when it is still pending, idle, and the agent is ready.
+   */
   #tryProcess(socket: WebSocket, key: string): void {
     const pending = this.#pending.get(key);
     if (!pending || pending.processing || !this.#ready) {
@@ -357,6 +422,9 @@ export class RemoteSession {
       .catch(cause => this.#fail(socket, cause));
   }
 
+  /**
+   * Encode and send a message only through the currently open socket.
+   */
   #send(socket: WebSocket, message: ClientMessage): void {
     if (socket !== this.#socket || socket.readyState !== WebSocket.OPEN) {
       throw new Error('WebSocket is not open');
@@ -365,11 +433,17 @@ export class RemoteSession {
     socket.send(encodeClientMessage(message));
   }
 
+  /**
+   * Convert an unexpected transport failure into an error state.
+   */
   #fail(socket: WebSocket, cause: unknown): void {
     const message = cause instanceof Error ? cause.message : String(cause);
     this.#finish(socket, 'error', message);
   }
 
+  /**
+   * Close the current socket with a terminal status and user-facing error.
+   */
   #finish(socket: WebSocket, status: ConnectionSnapshot['status'], error: string): void {
     if (socket !== this.#socket) {
       return;
@@ -391,6 +465,9 @@ export class RemoteSession {
     }
   }
 
+  /**
+   * Handle a peer-initiated close without affecting a replacement socket.
+   */
   #closed(socket: WebSocket): void {
     if (socket !== this.#socket) {
       return;
@@ -411,6 +488,9 @@ export class RemoteSession {
     }
   }
 
+  /**
+   * Discard all request state and publish the changed count when necessary.
+   */
   #clearPending(): void {
     if (this.#pending.size === 0) {
       return;
@@ -420,10 +500,16 @@ export class RemoteSession {
     this.#pendingChanged();
   }
 
+  /**
+   * Publish the current number of buffered or processing requests.
+   */
   #pendingChanged(): void {
     this.#setSnapshot({pendingRequests: this.#pending.size});
   }
 
+  /**
+   * Merge and publish a display-safe connection-state update.
+   */
   #setSnapshot(update: Partial<ConnectionSnapshot>): void {
     this.#snapshot = {...this.#snapshot, ...update};
     this.#onChange();
