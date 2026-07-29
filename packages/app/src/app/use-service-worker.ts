@@ -18,8 +18,10 @@ export function useServiceWorker() {
     async function register(): Promise<void> {
       try {
         const next = await registerPushServiceWorker();
+        const subscription = await next.pushManager.getSubscription();
         if (active) {
           setRegistration(next);
+          setPushRegistered(subscription !== null);
         }
       } catch (cause) {
         if (active) {
