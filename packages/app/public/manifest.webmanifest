@@ -1,0 +1,10 @@
+{
+  "id": "/",
+  "name": "agent-witness",
+  "short_name": "agent-witness",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff"
+}

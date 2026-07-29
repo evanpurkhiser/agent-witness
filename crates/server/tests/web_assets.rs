@@ -52,7 +52,24 @@ async fn serves_the_embedded_application_with_cache_validation() {
     assert_eq!(index.headers()["x-content-type-options"], "nosniff");
     let index = to_bytes(index.into_body(), usize::MAX).await.unwrap();
     let index = str::from_utf8(&index).unwrap();
+    assert!(index.contains(r#"rel="manifest" href="/manifest.webmanifest""#));
     let asset_path = attribute(index, "src=\"");
+
+    let manifest = app
+        .clone()
+        .oneshot(
+            Request::get("/manifest.webmanifest")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(manifest.status(), StatusCode::OK);
+    assert_eq!(
+        manifest.headers()[CONTENT_TYPE],
+        "application/manifest+json"
+    );
+    assert_eq!(manifest.headers()[CACHE_CONTROL], "no-cache");
 
     let head = app
         .clone()

@@ -10,6 +10,13 @@ export default defineConfig({
       app: fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  worker: {
+    rollupOptions: {
+      output: {
+        entryFileNames: 'assets/worker-[hash].js',
+      },
+    },
+  },
   server: {
     proxy: {
       '/api/agent': {

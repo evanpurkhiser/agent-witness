@@ -22,6 +22,10 @@ pub async fn index(headers: HeaderMap) -> Response {
     serve("index.html", REVALIDATE_CACHE, &headers)
 }
 
+pub async fn manifest(headers: HeaderMap) -> Response {
+    serve("manifest.webmanifest", REVALIDATE_CACHE, &headers)
+}
+
 pub async fn asset(Path(path): Path<String>, headers: HeaderMap) -> Response {
     serve(&format!("assets/{path}"), IMMUTABLE_CACHE, &headers)
 }
@@ -110,6 +114,7 @@ mod tests {
     #[test]
     fn embeds_the_page_and_worker_entrypoints() {
         assert!(Assets::get("index.html").is_some());
+        assert!(Assets::get("manifest.webmanifest").is_some());
         assert!(
             Assets::iter().any(|path| path.starts_with("assets/worker-") && path.ends_with(".js"))
         );

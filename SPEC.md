@@ -79,17 +79,27 @@ This project will solve that, within the following constraints:
 
 ## Web app workflow
 
-1. You register a new passkey-backed vault.
-2. You register as many private SSH keys (without passphrase) into that vault as
-   you would like.
-3. At this point the worker is connected over the WebSocket and can authenticate
-   agent requests.
-4. Install the app as a PWA onto the iPhone, then register for push
-   notifications.
-5. Now anytime the remote server gets an SSH agent request, it will trigger the
+1. Open the site in a browser. Before installation, the page displays
+   instructions to add agent-witness to the Home Screen and does not start the
+   dedicated worker, pair with the server, or create vault state.
+2. Install the app as a PWA onto the iPhone and launch it from the Home Screen.
+   The page identifies the installed app using the `display-mode: standalone`
+   media query.
+3. Register a new passkey-backed vault from the installed app.
+4. Register as many private SSH keys (without passphrase) into that vault as you
+   would like.
+5. Register for push notifications. At this point the worker is connected over
+   the WebSocket and can authenticate agent requests.
+6. Now anytime the remote server gets an SSH agent request, it will trigger the
    notification. Clicking the notification opens the PWA and triggers the
    WebAuthn request to unlock the vault, activate the agent, and handle the
    request over the WebSocket.
+
+A later browser-mode escape hatch may let the user explicitly continue without
+installing. It should be an intentional choice such as “I don't want to install
+the app,” not the default path. Continuing must then start pairing and keep all
+vault and pairing state in that browser context; installing afterward creates a
+separate storage context and requires a deliberate migration or pairing reset.
 
 ## Language choices
 
@@ -122,6 +132,8 @@ Owns everything that requires a visible, foreground browser context.
 **Responsibilities:**
 
 - Render the React UI
+- Gate initial setup on installed standalone display mode
+- Display installation instructions before starting the dedicated Web Worker
 - Register the service worker
 - Start and stop the dedicated Web Worker
 - Invoke WebAuthn and request the PRF output
