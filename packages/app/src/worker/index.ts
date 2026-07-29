@@ -36,13 +36,7 @@ class WorkerSession implements WorkerApi {
     },
     handleRequest: packet => this.#handleRequest(packet),
     onChange: () => void this.#publish(),
-    onDisconnect: () => {
-      // REVIEW: Kind of feel like we can move this to a `#handleDisconnect` and make it `void this.#handleDisconnect()`.
-      if (this.#state?.status === 'unlocked') {
-        this.#state = this.#state.lock();
-      }
-      void this.#publish();
-    },
+    onDisconnect: () => void this.#handleDisconnect(),
   });
 
   async #currentStore(): Promise<VaultStore> {
@@ -80,6 +74,14 @@ class WorkerSession implements WorkerApi {
     const state = await this.#current();
     assertVaultStatus(state, 'unlocked');
     return handleAgentRequest(request.payload, state.agentBackend());
+  }
+
+  async #handleDisconnect(): Promise<void> {
+    if (this.#state?.status === 'unlocked') {
+      this.#state = this.#state.lock();
+    }
+
+    await this.#publish();
   }
 
   getState(): Promise<WorkerSnapshot> {
