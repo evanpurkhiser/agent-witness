@@ -1,5 +1,7 @@
 # agent-witness
 
+[![Build Status](https://github.com/evanpurkhiser/agent-witness/actions/workflows/build.yml/badge.svg)](https://github.com/evanpurkhiser/agent-witness/actions/workflows/build.yml)
+
 A remote SSH agent that lets autonomous agents securely authenticate using
 keys that never leave your devices.
 
