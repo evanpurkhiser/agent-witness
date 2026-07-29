@@ -20,6 +20,7 @@ pub fn router(session: SessionConfig, max_message_size: usize) -> Router {
     let router = router
         .route("/", get(assets::index))
         .route("/manifest.webmanifest", get(assets::manifest))
+        .route("/service-worker.js", get(assets::service_worker))
         .route("/assets/{*path}", get(assets::asset));
 
     router.with_state(WebState {

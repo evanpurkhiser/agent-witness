@@ -73,6 +73,19 @@ async fn serves_the_embedded_application_with_cache_validation() {
     );
     assert_eq!(manifest.headers()[CACHE_CONTROL], "no-cache");
 
+    let service_worker = app
+        .clone()
+        .oneshot(
+            Request::get("/service-worker.js")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(service_worker.status(), StatusCode::OK);
+    assert_eq!(service_worker.headers()[CONTENT_TYPE], "text/javascript");
+    assert_eq!(service_worker.headers()[CACHE_CONTROL], "no-cache");
+
     let head = app
         .clone()
         .oneshot(Request::head("/").body(Body::empty()).unwrap())

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json && vite build",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json && tsc -p tsconfig.service-worker.json && vite build",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json && tsc -p tsconfig.test.json",
     "test": "vitest run",
     "preview": "vite preview"

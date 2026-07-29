@@ -17,6 +17,20 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      input: {
+        app: fileURLToPath(new URL('./index.html', import.meta.url)),
+        'service-worker': fileURLToPath(new URL('./service-worker.ts', import.meta.url)),
+      },
+      output: {
+        entryFileNames: chunk =>
+          chunk.name === 'service-worker'
+            ? 'service-worker.js'
+            : 'assets/[name]-[hash].js',
+      },
+    },
+  },
   server: {
     proxy: {
       '/api/agent': {
