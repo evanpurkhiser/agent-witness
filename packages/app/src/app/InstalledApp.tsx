@@ -1,12 +1,17 @@
 import {type FormEvent, useState} from 'react';
 
-import {useServiceWorker} from './use-service-worker';
+import {NotificationsProvider, useNotifications} from './NotificationsProvider';
+import {ServiceWorkerProvider} from './ServiceWorkerProvider';
 import {useWorker, WorkerProvider} from './WorkerProvider';
 
 export function InstalledApp() {
   return (
     <WorkerProvider>
-      <InstalledAppContent />
+      <ServiceWorkerProvider>
+        <NotificationsProvider>
+          <InstalledAppContent />
+        </NotificationsProvider>
+      </ServiceWorkerProvider>
     </WorkerProvider>
   );
 }
@@ -25,12 +30,11 @@ function InstalledAppContent() {
     removeKey,
   } = useWorker();
   const {
-    error: pushError,
-    working: pushWorking,
-    enablePushNotifications,
-    pushRegistrationReady,
-    pushRegistered,
-  } = useServiceWorker();
+    state: notificationState,
+    error: notificationError,
+    canEnable,
+    enable: enableNotifications,
+  } = useNotifications();
   const [pem, setPem] = useState('');
 
   async function submitKey(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -86,18 +90,24 @@ function InstalledAppContent() {
 
       <section aria-labelledby="notifications-heading">
         <h2 id="notifications-heading">Notifications</h2>
-        {pushError && <p role="alert">{pushError}</p>}
-        {pushRegistered ? (
+        {notificationError && <p role="alert">{notificationError}</p>}
+        {notificationState === 'enabled' ? (
           <p>Notifications enabled.</p>
+        ) : notificationState === 'unavailable' ? (
+          <p>Notifications are unavailable in this browser.</p>
+        ) : notificationState === 'denied' ? (
+          <p>Notifications are blocked. Enable them in your browser settings.</p>
         ) : (
           <>
             <p>Enable notifications for new SSH authentication requests.</p>
             <button
               type="button"
-              disabled={working || pushWorking || !pushRegistrationReady}
-              onClick={enablePushNotifications}
+              disabled={working || !canEnable}
+              onClick={enableNotifications}
             >
-              Enable notifications
+              {notificationState === 'enabling'
+                ? 'Enabling notifications…'
+                : 'Enable notifications'}
             </button>
           </>
         )}
