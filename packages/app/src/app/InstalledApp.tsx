@@ -2,6 +2,7 @@ import {type FormEvent, useState} from 'react';
 
 import {NotificationsProvider, useNotifications} from './NotificationsProvider';
 import {ServiceWorkerProvider} from './ServiceWorkerProvider';
+import {SigningScreen} from './SigningScreen';
 import {useWorker, WorkerProvider} from './WorkerProvider';
 
 export function InstalledApp() {
@@ -52,7 +53,28 @@ function InstalledAppContent() {
     );
   }
 
-  const {connection, vault} = snapshot;
+  const {connection, events, vault} = snapshot;
+
+  if (
+    vault.status !== 'no-vault' &&
+    connection.status !== 'rejected' &&
+    connection.status !== 'error'
+  ) {
+    return (
+      <SigningScreen
+        connection={connection}
+        events={events}
+        vault={vault}
+        working={working}
+        error={error}
+        onAuthorize={() => {
+          if (vault.status === 'locked') {
+            void unlock(vault.vault);
+          }
+        }}
+      />
+    );
+  }
 
   return (
     <main>
