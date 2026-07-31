@@ -10,7 +10,7 @@ export function ConnectionStatus({status}: {status: ConnectionSnapshot['status']
   }[status];
 
   return (
-    <div className="flex justify-center">
+    <div className="flex justify-start">
       <p
         role="status"
         className="flex h-7 items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 text-[10px] font-semibold tracking-[0.14em] text-zinc-500 uppercase shadow-xs"

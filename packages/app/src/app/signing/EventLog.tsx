@@ -11,11 +11,10 @@ interface EventLogProps {
 
 export function EventLog({events, error}: EventLogProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const followingRef = useRef(true);
 
   useLayoutEffect(() => {
     const scroll = scrollRef.current;
-    if (scroll && followingRef.current) {
+    if (scroll) {
       scroll.scrollTop = scroll.scrollHeight;
     }
   }, [events.length, error]);
@@ -43,11 +42,6 @@ export function EventLog({events, error}: EventLogProps) {
       <div
         ref={scrollRef}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-1"
-        onScroll={event => {
-          const element = event.currentTarget;
-          followingRef.current =
-            element.scrollHeight - element.scrollTop - element.clientHeight < 24;
-        }}
       >
         <div className="flex min-h-full flex-col justify-end">
           {events.length === 0 ? (

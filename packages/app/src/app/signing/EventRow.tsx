@@ -39,7 +39,7 @@ function EventMessage({event}: {event: AgentEvent}) {
       return (
         <>
           <EventToken label={`Request ${event.requestId}`} value={event.requestId} />{' '}
-          Signing {formatBytes(event.bytes)} with{' '}
+          Signing via{' '}
           <EventToken
             label={`Key fingerprint ${event.fingerprint}`}
             value={event.fingerprint}
@@ -89,8 +89,15 @@ function formatBytes(bytes: number): string {
 }
 
 function shortFingerprint(fingerprint: string): string {
-  const value = fingerprint.startsWith('SHA256:')
+  const encoded = fingerprint.startsWith('SHA256:')
     ? fingerprint.slice('SHA256:'.length)
     : fingerprint;
-  return value.length > 10 ? `${value.slice(0, 10)}…` : value;
+
+  try {
+    return Array.from(atob(encoded).slice(0, 3), character =>
+      character.charCodeAt(0).toString(16).padStart(2, '0'),
+    ).join(':');
+  } catch {
+    return encoded.slice(0, 6);
+  }
 }
