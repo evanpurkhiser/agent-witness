@@ -4,7 +4,7 @@ import {describe, expect, it} from 'vitest';
 
 import type {PairingRecord} from 'app/remote/session';
 
-import {openVaultStore} from './storage';
+import {MAX_STORED_AGENT_EVENTS, openVaultStore} from './storage';
 import type {EncryptedKey, Vault} from './types';
 
 /**
@@ -113,6 +113,39 @@ describe('VaultStore', () => {
 
     await store.deletePairing(pairing.endpoint);
     expect(await store.loadPairing(pairing.endpoint)).toBeNull();
+  });
+
+  it('persists agent events chronologically', async () => {
+    const store = await freshStore();
+
+    await store.appendAgentEvent({id: 'later', at: 200, type: 'vault_unlocked'});
+    await store.appendAgentEvent({
+      id: 'earlier',
+      at: 100,
+      type: 'vault_locked',
+      reason: 'manual',
+    });
+
+    expect(await store.loadAgentEvents()).toEqual([
+      {id: 'earlier', at: 100, type: 'vault_locked', reason: 'manual'},
+      {id: 'later', at: 200, type: 'vault_unlocked'},
+    ]);
+  });
+
+  it('prunes the oldest agent events beyond the retention limit', async () => {
+    const store = await freshStore();
+
+    for (let index = 0; index <= MAX_STORED_AGENT_EVENTS; index += 1) {
+      await store.appendAgentEvent({
+        id: String(index).padStart(3, '0'),
+        at: index,
+        type: 'vault_unlocked',
+      });
+    }
+
+    const events = await store.loadAgentEvents();
+    expect(events).toHaveLength(MAX_STORED_AGENT_EVENTS);
+    expect(events[0]).toMatchObject({id: '001', at: 1});
   });
 
   it('destroys the vault and all keys', async () => {

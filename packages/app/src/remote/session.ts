@@ -54,6 +54,12 @@ export interface PushSubscriptionRegistration {
   auth: string;
 }
 
+export interface RemoteRequest {
+  requestId: string;
+  attempt: number;
+  packet: Bytes;
+}
+
 // REVIEW: Make this a discriminated union so status-specific fields do not
 // require null placeholders.
 /**
@@ -76,6 +82,9 @@ export interface RemoteSessionOptions {
   handleRequest(packet: Bytes): Promise<Bytes>;
   onChange(): void;
   onDisconnect(): void;
+  onRequestPending?(request: RemoteRequest): void;
+  onRequestProcessing?(request: RemoteRequest): void;
+  onRequestClosed?(request: RemoteRequest): void;
   createSocket?: (endpoint: string) => WebSocket;
 }
 
@@ -94,6 +103,9 @@ export class RemoteSession {
   readonly #handleRequest: (packet: Bytes) => Promise<Bytes>;
   readonly #onChange: () => void;
   readonly #onDisconnect: () => void;
+  readonly #onRequestPending: (request: RemoteRequest) => void;
+  readonly #onRequestProcessing: (request: RemoteRequest) => void;
+  readonly #onRequestClosed: (request: RemoteRequest) => void;
   readonly #createSocket: (endpoint: string) => WebSocket;
 
   #socket: WebSocket | null = null;
@@ -143,6 +155,9 @@ export class RemoteSession {
     this.#handleRequest = options.handleRequest;
     this.#onChange = options.onChange;
     this.#onDisconnect = options.onDisconnect;
+    this.#onRequestPending = options.onRequestPending ?? (() => undefined);
+    this.#onRequestProcessing = options.onRequestProcessing ?? (() => undefined);
+    this.#onRequestClosed = options.onRequestClosed ?? (() => undefined);
     this.#createSocket = options.createSocket ?? (endpoint => new WebSocket(endpoint));
   }
 
@@ -479,6 +494,7 @@ export class RemoteSession {
       ...message,
       processing: false,
     });
+    this.#onRequestPending(toRemoteRequest(message));
     this.#pendingChanged();
 
     this.#tryProcess(socket, key);
@@ -488,9 +504,15 @@ export class RemoteSession {
    * Remove a buffered request or suppress its in-flight response.
    */
   #cancel(requestId: string, attempt: number): void {
-    if (this.#pending.delete(requestKey(requestId, attempt))) {
-      this.#pendingChanged();
+    const key = requestKey(requestId, attempt);
+    const pending = this.#pending.get(key);
+    if (!pending) {
+      return;
     }
+
+    this.#pending.delete(key);
+    this.#onRequestClosed(toRemoteRequest(pending));
+    this.#pendingChanged();
   }
 
   /**
@@ -510,6 +532,7 @@ export class RemoteSession {
     }
 
     pending.processing = true;
+    this.#onRequestProcessing(toRemoteRequest(pending));
     void this.#handleRequest(pending.packet)
       .then(packet => {
         if (socket !== this.#socket || this.#pending.get(key) !== pending) {
@@ -668,4 +691,12 @@ export class RemoteSession {
 
 function requestKey(requestId: string, attempt: number): string {
   return `${requestId}:${attempt}`;
+}
+
+function toRemoteRequest(request: PendingRequest | RemoteRequest): RemoteRequest {
+  return {
+    requestId: request.requestId,
+    attempt: request.attempt,
+    packet: request.packet,
+  };
 }
