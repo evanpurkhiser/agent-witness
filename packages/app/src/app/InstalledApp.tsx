@@ -2,7 +2,7 @@ import {type FormEvent, useState} from 'react';
 
 import {NotificationsProvider, useNotifications} from './NotificationsProvider';
 import {ServiceWorkerProvider} from './ServiceWorkerProvider';
-import {SigningScreen} from './SigningScreen';
+import {SigningScreen} from './signing/SigningScreen';
 import {useWorker, WorkerProvider} from './WorkerProvider';
 
 export function InstalledApp() {
