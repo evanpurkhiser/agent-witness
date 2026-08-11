@@ -3,10 +3,10 @@ import type {AgentEvent} from 'app/worker/events';
 export function EventRow({event}: {event: AgentEvent}) {
   return (
     <li
-      className={`grid grid-cols-[3.25rem_minmax(0,1fr)] px-3.5 py-2 text-xs leading-5 ${event.type === 'request_pending' ? 'bg-amber-50 text-amber-950' : 'text-zinc-700'}`}
+      className={`grid grid-cols-[3.25rem_minmax(0,1fr)] px-3.5 py-2 text-xs leading-5 ${event.type === 'request_pending' ? 'bg-warning text-warning-foreground' : 'text-foreground-muted'}`}
     >
       <time
-        className="tabular-nums text-zinc-400"
+        className="text-foreground-faint tabular-nums"
         dateTime={new Date(event.at).toISOString()}
       >
         {formatTime(event.at)}
@@ -25,7 +25,7 @@ function EventMessage({event}: {event: AgentEvent}) {
     case 'vault_locked':
       return (
         <>
-          Vault locked <span className="text-zinc-400">({event.reason})</span>
+          Vault locked <span className="text-foreground-faint">({event.reason})</span>
         </>
       );
     case 'request_pending':
@@ -50,7 +50,7 @@ function EventMessage({event}: {event: AgentEvent}) {
       );
     case 'request_closed':
       return (
-        <span className="text-zinc-500">
+        <span className="text-foreground-subtle">
           <EventToken label={`Request ${event.requestId}`} value={event.requestId} />{' '}
           Request closed
         </span>
@@ -69,7 +69,7 @@ function EventToken({label, value, displayValue = value.slice(0, 8)}: EventToken
     <code
       aria-label={label}
       title={value}
-      className="mr-1 inline-flex rounded border border-zinc-200 bg-zinc-50 px-1 py-px text-[10px] leading-4 text-zinc-600"
+      className="border-border bg-canvas text-foreground-muted mr-1 inline-flex rounded border px-1 py-px text-[10px] leading-4"
     >
       {displayValue}
     </code>

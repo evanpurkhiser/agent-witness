@@ -19,7 +19,7 @@ export function AuthorizeButton({
     <button
       type="button"
       aria-busy={working}
-      className="h-16 w-full rounded-lg border border-zinc-950 bg-zinc-950 px-6 text-sm font-semibold tracking-[0.08em] text-white uppercase shadow-sm transition active:scale-[0.99] disabled:border-zinc-200 disabled:bg-zinc-200 disabled:text-zinc-400 disabled:shadow-none disabled:active:scale-100"
+      className="border-border-primary bg-primary text-primary-foreground disabled:border-border disabled:bg-surface-disabled disabled:text-foreground-disabled h-16 w-full rounded-lg border px-6 text-sm font-semibold tracking-[0.08em] uppercase shadow-sm transition active:scale-[0.99] disabled:shadow-none disabled:active:scale-100"
       disabled={!canAuthorize}
       onClick={onAuthorize}
     >

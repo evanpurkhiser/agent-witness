@@ -22,12 +22,12 @@ export function EventLog({events, error}: EventLogProps) {
   return (
     <section
       aria-labelledby="event-log-heading"
-      className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-xs"
+      className="border-border bg-surface flex min-h-0 flex-col overflow-hidden rounded-lg border shadow-xs"
     >
-      <header className="flex h-11 shrink-0 items-center justify-between border-b border-zinc-200 px-3.5">
+      <header className="border-border flex h-11 shrink-0 items-center justify-between border-b px-3.5">
         <h1
           id="event-log-heading"
-          className="text-[11px] font-semibold tracking-[0.16em] text-zinc-700 uppercase"
+          className="text-foreground-muted text-[11px] font-semibold tracking-[0.16em] uppercase"
         >
           Event log
         </h1>
@@ -45,7 +45,9 @@ export function EventLog({events, error}: EventLogProps) {
       >
         <div className="flex min-h-full flex-col justify-end">
           {events.length === 0 ? (
-            <p className="px-3.5 py-3 text-xs text-zinc-400">No events recorded.</p>
+            <p className="text-foreground-faint px-3.5 py-3 text-xs">
+              No events recorded.
+            </p>
           ) : (
             <ol aria-label="Agent events" aria-live="polite" aria-relevant="additions">
               {events.map(event => (
@@ -58,8 +60,8 @@ export function EventLog({events, error}: EventLogProps) {
               role="alert"
               className="grid grid-cols-[3.25rem_minmax(0,1fr)] px-3.5 py-2 text-xs"
             >
-              <span className="text-red-400">error</span>
-              <span className="text-red-700">{error}</span>
+              <span className="text-danger-subtle">error</span>
+              <span className="text-danger">{error}</span>
             </p>
           )}
         </div>

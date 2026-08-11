@@ -24,7 +24,7 @@ export function SigningScreen({
   onAuthorize,
 }: SigningScreenProps) {
   return (
-    <main className="fixed inset-0 grid grid-rows-[minmax(0,1fr)_auto] gap-3 bg-zinc-50 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(0.75rem,env(safe-area-inset-bottom))] font-mono text-zinc-950">
+    <main className="bg-canvas text-foreground fixed inset-0 grid grid-rows-[minmax(0,1fr)_auto] gap-3 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(0.75rem,env(safe-area-inset-bottom))] font-mono">
       <EventLog events={events} error={error ?? connection.error} />
 
       <footer className="grid gap-3">
