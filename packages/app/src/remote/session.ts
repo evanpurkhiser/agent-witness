@@ -57,6 +57,7 @@ export interface PushSubscriptionRegistration {
 export interface RemoteRequest {
   requestId: string;
   attempt: number;
+  requestedAt: number;
   deadline: number;
   packet: Bytes;
 }
@@ -706,6 +707,7 @@ function toRemoteRequest(request: PendingRequest | RemoteRequest): RemoteRequest
   return {
     requestId: request.requestId,
     attempt: request.attempt,
+    requestedAt: request.requestedAt,
     deadline: request.deadline,
     packet: request.packet,
   };

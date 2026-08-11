@@ -127,6 +127,7 @@ pub enum ServerMessage {
         #[serde(with = "uuid::serde::hyphenated")]
         request_id: RequestId,
         attempt: u32,
+        requested_at: u64,
         deadline: u64,
         packet: Bytes,
     },
@@ -144,11 +145,13 @@ impl From<RemoteCommand> for ServerMessage {
             RemoteCommand::Request {
                 request_id,
                 attempt,
+                requested_at,
                 deadline,
                 packet,
             } => Self::AgentRequest {
                 request_id,
                 attempt,
+                requested_at,
                 deadline,
                 packet,
             },

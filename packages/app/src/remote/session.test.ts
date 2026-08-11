@@ -116,6 +116,7 @@ describe('RemoteSession', () => {
       type: 'agent_request',
       request_id: REQUEST_ID,
       attempt: 1,
+      requested_at: 1_799_999_910_000,
       deadline: 1_800_000_000_000,
       packet,
     });
@@ -147,6 +148,7 @@ describe('RemoteSession', () => {
       type: 'agent_request',
       request_id: REQUEST_ID,
       attempt: 2,
+      requested_at: 1_799_999_910_000,
       deadline: 1_800_000_000_000,
       packet: signPacket(),
     });
@@ -189,6 +191,7 @@ describe('RemoteSession', () => {
       type: 'agent_request',
       request_id: REQUEST_ID,
       attempt: 3,
+      requested_at: 1_799_999_910_000,
       deadline: 1_800_000_000_000,
       packet: bytes(0, 0, 0, 1, 11),
     });
@@ -244,6 +247,7 @@ describe('RemoteSession', () => {
       type: 'agent_request',
       request_id: REQUEST_ID,
       attempt: 4,
+      requested_at: 1_799_999_910_000,
       deadline: 1_800_000_000_000,
       packet,
     });
@@ -252,6 +256,7 @@ describe('RemoteSession', () => {
     const request = {
       requestId: REQUEST_ID,
       attempt: 4,
+      requestedAt: 1_799_999_910_000,
       deadline: 1_800_000_000_000,
       packet,
     };

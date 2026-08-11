@@ -27,6 +27,7 @@ fn submit(
                 request_id,
                 packet: Bytes::from_static(packet),
                 deadline: now + Duration::from_secs(30),
+                requested_at: 1_799_999_970_000,
                 deadline_timestamp: 1_800_000_000_000,
             },
             now,
@@ -398,6 +399,7 @@ async fn actor_forwards_and_correlates_a_request() {
     let RemoteCommand::Request {
         request_id,
         attempt,
+        requested_at,
         deadline,
         packet,
     } = remote.commands.recv().await.unwrap()
@@ -405,6 +407,7 @@ async fn actor_forwards_and_correlates_a_request() {
         panic!("expected a request")
     };
     assert_eq!(packet, Bytes::from_static(b"request"));
+    assert_eq!(deadline - requested_at, 1_000);
     let remaining = deadline.saturating_sub(
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

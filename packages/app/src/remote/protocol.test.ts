@@ -34,10 +34,11 @@ const RUST_SERVER_PAIRED = fromHex(`
   01010101010101010101010101010101010101010101010101010101010101010101010101
 `);
 const RUST_SERVER_AGENT_REQUEST = fromHex(`
-  82a776657273696f6e01a76d65737361676585a474797065ad6167656e745f726571756573
+  82a776657273696f6e01a76d65737361676586a474797065ad6167656e745f726571756573
   74aa726571756573745f6964d92461616161616161612d626262622d346363632d38646464
-  2d656565656565656565656565a7617474656d707404a8646561646c696e65cf000001a318
-  5c5000a67061636b6574c405000000010b
+  2d656565656565656565656565a7617474656d707404ac7265717565737465645f6174cf00
+  0001a3185af070a8646561646c696e65cf000001a3185c5000a67061636b6574c405000000
+  010b
 `);
 
 describe('encodeClientMessage', () => {
@@ -167,6 +168,7 @@ describe('decodeServerMessage', () => {
       type: 'agent_request',
       requestId: CLIENT_ID,
       attempt: 4,
+      requestedAt: 1_799_999_910_000,
       deadline: 1_800_000_000_000,
       packet: bytes(0, 0, 0, 1, 11),
     });
@@ -240,6 +242,7 @@ describe('decodeServerMessage', () => {
           type: 'agent_request',
           request_id: CLIENT_ID,
           attempt: -1,
+          requested_at: 1_799_999_910_000,
           deadline: 1_800_000_000_000,
           packet: bytes(0),
         },
@@ -253,6 +256,7 @@ describe('decodeServerMessage', () => {
           type: 'agent_request',
           request_id: CLIENT_ID,
           attempt: 1,
+          requested_at: 1_799_999_910_000,
           deadline: 1_800_000_000_000,
           packet: [0, 1],
         },

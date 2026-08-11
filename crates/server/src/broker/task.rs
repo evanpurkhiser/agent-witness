@@ -227,6 +227,7 @@ impl BrokerActor {
     fn handle_local(&mut self, request: PacketRequest) -> CancellationFuture {
         let request_id = Uuid::new_v4();
         let now = Instant::now();
+        let requested_at = SystemTime::now();
         let (abort, registration) = AbortHandle::new_pair();
         let PacketRequest {
             packet,
@@ -246,9 +247,8 @@ impl BrokerActor {
                 request_id,
                 packet,
                 deadline: now + self.config.request_timeout,
-                deadline_timestamp: unix_milliseconds(
-                    SystemTime::now() + self.config.request_timeout,
-                ),
+                requested_at: unix_milliseconds(requested_at),
+                deadline_timestamp: unix_milliseconds(requested_at + self.config.request_timeout),
             },
             now,
         );
@@ -346,6 +346,7 @@ impl BrokerActor {
                     session_id,
                     request_id,
                     attempt,
+                    requested_at,
                     deadline,
                     packet,
                 } => {
@@ -359,6 +360,7 @@ impl BrokerActor {
                                 .send(RemoteCommand::Request {
                                     request_id,
                                     attempt,
+                                    requested_at,
                                     deadline,
                                     packet,
                                 })

@@ -45,6 +45,9 @@ pub enum RemoteCommand {
         /// Monotonically increasing dispatch attempt for this request.
         attempt: u32,
 
+        /// Absolute Unix timestamp in milliseconds when the request was admitted.
+        requested_at: u64,
+
         /// Absolute Unix timestamp in milliseconds when the request expires.
         deadline: u64,
 
