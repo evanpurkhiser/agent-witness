@@ -1,4 +1,4 @@
-import {lazy, Suspense} from 'react';
+import {lazy, Suspense, useState} from 'react';
 
 import {InstallScreen} from './InstallScreen';
 
@@ -11,8 +11,10 @@ function isInstalled(): boolean {
 }
 
 export function App() {
-  if (!isInstalled()) {
-    return <InstallScreen />;
+  const [useInBrowser, setUseInBrowser] = useState(false);
+
+  if (!isInstalled() && !useInBrowser) {
+    return <InstallScreen onContinue={() => setUseInBrowser(true)} />;
   }
 
   return (
