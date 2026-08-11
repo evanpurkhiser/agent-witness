@@ -1,0 +1,11 @@
+state_path = ".dev/state.json"
+vapid_private_key_file = ".dev/vapid.key"
+control_socket = ".dev/control.sock"
+control_socket_mode = "0600"
+unix_socket = ".dev/agent.sock"
+socket_mode = "0600"
+http_listen = "127.0.0.1:19345"
+request_timeout = "90s"
+max_agent_packet_size = 262144
+max_pending_requests = 32
+remote_capacity = 32

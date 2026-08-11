@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly BACKEND_URL="http://127.0.0.1:19345"
+readonly VITE_PORT=5173
+
+children=()
+
+cleanup() {
+	trap - EXIT INT TERM
+
+	if ((${#children[@]})); then
+		kill "${children[@]}" 2>/dev/null || true
+		wait "${children[@]}" 2>/dev/null || true
+	fi
+}
+
+trap cleanup EXIT INT TERM
+
+cd "$ROOT_DIR"
+mkdir -p .dev
+
+for command in cargo pnpm; do
+	if ! command -v "$command" >/dev/null; then
+		echo "Required command not found: $command" >&2
+		exit 1
+	fi
+done
+
+cargo build --locked --bin agent-witness
+
+target/debug/agent-witness --config dev/agent-witness.toml serve &
+children+=("$!")
+
+AGENT_WITNESS_BACKEND="$BACKEND_URL" \
+	pnpm --filter app dev --host 127.0.0.1 --port "$VITE_PORT" &
+children+=("$!")
+
+wait -n "${children[@]}"

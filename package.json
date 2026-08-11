@@ -7,6 +7,7 @@
   "author": "Evan Purkhiser",
   "scripts": {
     "build:production": "pnpm --filter app build && cargo build --locked --release --features embedded-ui",
+    "dev": "scripts/dev-server",
     "lint": "oxlint .",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",

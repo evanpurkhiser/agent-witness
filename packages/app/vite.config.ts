@@ -33,9 +33,10 @@ export default defineConfig({
     },
   },
   server: {
+    allowedHosts: true,
     proxy: {
       '/api/agent': {
-        target: 'http://127.0.0.1:9345',
+        target: process.env.AGENT_WITNESS_BACKEND ?? 'http://127.0.0.1:9345',
         ws: true,
       },
     },

@@ -12,6 +12,21 @@ sign, it wakes your phone with a push notification to authorize the request.
 > [!WARNING]
 > Early work in progress.
 
+## Development
+
+Run the app and an isolated development daemon:
+
+```console
+pnpm dev
+```
+
+The daemon listens on `127.0.0.1:19345`, while Vite listens on
+`127.0.0.1:5173`. Use an HTTPS reverse proxy to open the Vite server on the
+phone, add it to the Home Screen, and launch it from there.
+
+Development pairing state and the VAPID key persist in the ignored `.dev`
+directory. Press Ctrl-C to stop both processes.
+
 ## Production build
 
 Install the pinned toolchain and JavaScript dependencies, then build the
