@@ -10,12 +10,21 @@ import {
   wrapMasterKey,
 } from 'app/crypto/master-key';
 import {importSSHKey, wrapSSHKey} from 'app/crypto/ssh';
-import type {AgentBackend} from 'app/ssh/agent';
+import type {
+  AgentBackend,
+  EmptyAgentBackend,
+  PublicAgentBackend,
+  UnlockedAgentBackend,
+} from 'app/ssh/agent';
 import {sshFingerprint} from 'app/ssh/fingerprint';
 import {parseOpenSSHPrivateKey} from 'app/ssh/key';
 import type {Bytes} from 'app/utils/bytes';
 
-import {createAgentBackend} from './agent-backend';
+import {
+  createEmptyAgentBackend,
+  createPublicAgentBackend,
+  createUnlockedAgentBackend,
+} from './agent-backend';
 import type {VaultStore} from './storage';
 import type {PrivateKeyMeta, Vault} from './types';
 
@@ -58,6 +67,10 @@ export interface CreateVaultParams {
 export interface NoVault {
   readonly status: 'no-vault';
   /**
+   * An empty ssh-agent backend.
+   */
+  agentBackend(): EmptyAgentBackend;
+  /**
    * Create the single vault, leaving it unlocked.
    */
   createVault(params: CreateVaultParams): Promise<UnlockedVault>;
@@ -69,6 +82,10 @@ export interface NoVault {
  */
 export interface LoadedVault<Self> {
   readonly vault: Vault;
+  /**
+   * An ssh-agent backend exposing the vault's public identities.
+   */
+  agentBackend(): AgentBackend;
   /**
    * Remove a key and its blob. Needs no master key, so it works in any state.
    */
@@ -84,6 +101,7 @@ export interface LoadedVault<Self> {
  */
 export interface LockedVault extends LoadedVault<LockedVault> {
   readonly status: 'locked';
+  agentBackend(): PublicAgentBackend;
   /**
    * Recover the master key from any enrolled passkey the PRF output can unwrap.
    * Rejects with `WrongPasskey` if none match.
@@ -102,10 +120,9 @@ export interface UnlockedVault extends LoadedVault<UnlockedVault> {
    */
   addKey(pem: string, name?: string): Promise<UnlockedVault>;
   /**
-   * An ssh-agent backend serving this vault's keys. Available only while
-   * unlocked, since signing needs the resident master key.
+   * An ssh-agent backend that can sign with the resident master key.
    */
-  agentBackend(): AgentBackend;
+  agentBackend(): UnlockedAgentBackend;
   /**
    * Drop the resident master key, returning to the locked state.
    */
@@ -242,6 +259,9 @@ async function storeRemoveKey(
 function noVault(store: VaultStore): NoVault {
   return {
     status: 'no-vault',
+    agentBackend() {
+      return createEmptyAgentBackend();
+    },
     async createVault(params) {
       const {vault, masterKey} = await createNewVault(store, params);
       return unlockedVault(store, vault, masterKey);
@@ -256,6 +276,9 @@ function lockedVault(store: VaultStore, vault: Vault): LockedVault {
   return {
     status: 'locked',
     vault,
+    agentBackend() {
+      return createPublicAgentBackend(vault);
+    },
     async unlock(prfOutput) {
       return unlockedVault(store, vault, await recoverMasterKey(vault, prfOutput));
     },
@@ -288,7 +311,7 @@ function unlockedVault(
       return unlockedVault(store, await storeRemoveKey(store, vault, keyId), masterKey);
     },
     agentBackend() {
-      return createAgentBackend(store, vault, masterKey);
+      return createUnlockedAgentBackend(store, vault, masterKey);
     },
     lock() {
       return lockedVault(store, vault);

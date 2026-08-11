@@ -12,6 +12,7 @@ import {
 import {
   AgentMessage,
   handleAgentRequest,
+  inspectAgentRequest,
   parseSignRequest,
   readFrame,
 } from 'app/ssh/agent';
@@ -52,6 +53,8 @@ class WorkerSession implements WorkerApi {
         this.#currentStore().then(store => store.deletePairing(endpoint)),
     },
     handleRequest: packet => this.#handleRequest(packet),
+    canProcessBeforeReady: request =>
+      inspectAgentRequest(request.packet).type === 'identities',
     onChange: () => void this.#publish(),
     onDisconnect: () => void this.#handleDisconnect(),
     onRequestPending: request => void this.#recordPendingRequest(request),
@@ -98,7 +101,6 @@ class WorkerSession implements WorkerApi {
     }
 
     const state = await this.#current();
-    assertVaultStatus(state, 'unlocked');
     return handleAgentRequest(request.payload, state.agentBackend());
   }
 

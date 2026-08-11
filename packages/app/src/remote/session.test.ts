@@ -1,6 +1,7 @@
 import {decode, encode} from '@msgpack/msgpack';
 import {describe, expect, it, vi} from 'vitest';
 
+import {inspectAgentRequest} from 'app/ssh/agent';
 import type {Bytes} from 'app/utils/bytes';
 
 import {type PairingRecord, type PairingStore, RemoteSession} from './session';
@@ -93,7 +94,44 @@ describe('RemoteSession', () => {
     expect(session.snapshot().vapidPublicKey).toBeNull();
   });
 
-  it('buffers requests while locked and drains them after unlock', async () => {
+  it('processes allowed requests while locked', async () => {
+    const store = new MemoryPairingStore(pairing());
+    const handleRequest = vi.fn(() => Promise.resolve(bytes(0, 0, 0, 1, 12)));
+    const packet = bytes(0, 0, 0, 1, 11);
+    const {session, socket} = await connectSession({
+      store,
+      handleRequest,
+      canProcessBeforeReady: request =>
+        inspectAgentRequest(request.packet).type === 'identities',
+    });
+    socket.receive({
+      type: 'authenticated',
+      server_id: SERVER_ID,
+      session_id: SESSION_ID,
+      vapid_public_key: VAPID_PUBLIC_KEY,
+    });
+    await settle();
+
+    socket.receive({
+      type: 'agent_request',
+      request_id: REQUEST_ID,
+      attempt: 1,
+      deadline: 1_800_000_000_000,
+      packet,
+    });
+    await settle();
+
+    expect(handleRequest).toHaveBeenCalledWith(packet);
+    expect(sentMessages(socket).at(-1)).toEqual({
+      type: 'agent_response',
+      request_id: REQUEST_ID,
+      attempt: 1,
+      packet: bytes(0, 0, 0, 1, 12),
+    });
+    expect(session.snapshot().pendingRequests).toBe(0);
+  });
+
+  it('buffers signing requests while locked and drains them after unlock', async () => {
     const store = new MemoryPairingStore(pairing());
     const handleRequest = vi.fn(() => Promise.resolve(bytes(0, 0, 0, 1, 12)));
     const {session, socket} = await connectSession({store, handleRequest});
@@ -110,7 +148,7 @@ describe('RemoteSession', () => {
       request_id: REQUEST_ID,
       attempt: 2,
       deadline: 1_800_000_000_000,
-      packet: bytes(0, 0, 0, 1, 11),
+      packet: signPacket(),
     });
     await settle();
 
@@ -120,7 +158,7 @@ describe('RemoteSession', () => {
     session.setReady(true);
     await settle();
 
-    expect(handleRequest).toHaveBeenCalledWith(bytes(0, 0, 0, 1, 11));
+    expect(handleRequest).toHaveBeenCalledWith(signPacket());
     expect(sentMessages(socket).at(-1)).toEqual({
       type: 'agent_response',
       request_id: REQUEST_ID,
@@ -201,7 +239,7 @@ describe('RemoteSession', () => {
     });
     await settle();
 
-    const packet = bytes(0, 0, 0, 1, 13);
+    const packet = signPacket();
     socket.receive({
       type: 'agent_request',
       request_id: REQUEST_ID,
@@ -350,15 +388,18 @@ async function connectSession({
   store,
   ready = false,
   handleRequest = () => Promise.resolve(bytes(0, 0, 0, 1, 5)),
+  canProcessBeforeReady,
 }: {
   store: PairingStore;
   ready?: boolean;
   handleRequest?: (packet: Bytes) => Promise<Bytes>;
+  canProcessBeforeReady?: (request: {packet: Bytes}) => boolean;
 }): Promise<{session: RemoteSession; socket: FakeSocket}> {
   const sockets: FakeSocket[] = [];
   const session = new RemoteSession({
     pairingStore: store,
     handleRequest,
+    canProcessBeforeReady,
     onChange() {},
     onDisconnect() {},
     createSocket: endpoint => {
@@ -459,6 +500,10 @@ function sentMessages(socket: FakeSocket): unknown[] {
 
 function bytes(...values: number[]): Bytes {
   return new Uint8Array(values);
+}
+
+function signPacket(): Bytes {
+  return bytes(0, 0, 0, 15, 13, 0, 0, 0, 1, 7, 0, 0, 0, 1, 8, 0, 0, 0, 0);
 }
 
 function settle(): Promise<void> {

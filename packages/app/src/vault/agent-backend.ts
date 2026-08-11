@@ -1,27 +1,45 @@
-// The vault as an ssh-agent backend: it presents the vault's public identities
-// and signs requests by unwrapping the matching key under the master key. Built
-// for an unlocked vault (see vault/vault.ts), which supplies the store, current
-// metadata, and resident master key.
+// Vault-state ssh-agent backends: empty without a vault, public-only while
+// locked, and signing-capable with a resident master key.
 
 import {sshSign, unwrapSSHKey} from 'app/crypto/ssh';
-import {type AgentBackend, rsaFlavorFromFlags} from 'app/ssh/agent';
+import {
+  type EmptyAgentBackend,
+  type PublicAgentBackend,
+  rsaFlavorFromFlags,
+  type UnlockedAgentBackend,
+} from 'app/ssh/agent';
 import {bytesEqual} from 'app/utils/bytes';
 
 import type {VaultStore} from './storage';
 import type {Vault} from './types';
 
 /**
- * Build an agent backend over an unlocked vault's keys and resident master key.
+ * Build an agent backend for an absent vault.
  */
-export function createAgentBackend(
+export function createEmptyAgentBackend(): EmptyAgentBackend {
+  return {listIdentities: () => []};
+}
+
+/**
+ * Build an agent backend over a vault's public key metadata.
+ */
+export function createPublicAgentBackend(vault: Vault): PublicAgentBackend {
+  return {
+    listIdentities: () =>
+      vault.keys.map(key => ({keyBlob: key.publicKey, comment: key.comment})),
+  };
+}
+
+/**
+ * Build an agent backend over an unlocked vault and its resident master key.
+ */
+export function createUnlockedAgentBackend(
   store: VaultStore,
   vault: Vault,
   masterKey: CryptoKey,
-): AgentBackend {
+): UnlockedAgentBackend {
   return {
-    listIdentities() {
-      return vault.keys.map(key => ({keyBlob: key.publicKey, comment: key.comment}));
-    },
+    ...createPublicAgentBackend(vault),
 
     async sign(request) {
       const key = vault.keys.find(candidate =>

@@ -221,7 +221,8 @@ signing live — in TypeScript over WebCrypto, not in WASM.
 - Open and maintain the WebSocket
 - Register the browser's push subscription with the paired server
 - Receive remote agent messages
-- Buffer a bounded number of agent requests in memory while the vault is locked
+- Answer identity-list requests from public metadata while the vault is locked
+- Buffer a bounded number of signing requests in memory while the vault is locked
 - Implement the ssh-agent protocol and produce signatures via WebCrypto
 - Return encoded responses over the WebSocket
 - Notify the page about connection and request state
@@ -244,9 +245,9 @@ unlocked-agent lifetime ⊆ WebSocket lifetime
 ```
 
 The authenticated worker may receive requests before WebAuthn unlocks the
-vault. Those requests stay only in worker memory and are processed after
-unlock. When the worker terminates, the server should treat the agent as
-unavailable.
+vault. Identity-list requests are answered immediately from public metadata.
+Signing requests stay only in worker memory and are processed after unlock.
+When the worker terminates, the server should treat the agent as unavailable.
 
 ### Vault core (crypto and protocol)
 
@@ -534,7 +535,8 @@ client connected?
 send request over WebSocket
         ↓
 vault unlocked?
-   no → buffer in worker memory
+   no → identity list? → answer from public metadata
+        → otherwise buffer in worker memory
         → notify page and wait for unlock
    yes
         ↓

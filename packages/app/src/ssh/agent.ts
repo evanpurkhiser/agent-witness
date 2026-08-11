@@ -44,6 +44,12 @@ export interface SignRequest {
   flags: number;
 }
 
+export type AgentRequestInfo =
+  | {type: 'identities'}
+  | {type: 'sign'; keyBlob: Bytes; bytes: number; flags: number}
+  | {type: 'unsupported'; messageType: number}
+  | {type: 'invalid'};
+
 /**
  * The operations the agent needs from the vault. Kept as an interface so the
  * protocol code has no crypto or vault dependency.
@@ -55,8 +61,20 @@ export interface AgentBackend {
   listIdentities(): AgentIdentity[] | Promise<AgentIdentity[]>;
   /**
    * Produce the SSH signature blob for a request, or reject if the key is
-   * unknown.
+   * unknown. Present only when private key material is available.
    */
+  sign?(request: SignRequest): Promise<Bytes>;
+}
+
+export interface EmptyAgentBackend extends AgentBackend {
+  sign?: never;
+}
+
+export interface PublicAgentBackend extends AgentBackend {
+  sign?: never;
+}
+
+export interface UnlockedAgentBackend extends AgentBackend {
   sign(request: SignRequest): Promise<Bytes>;
 }
 
@@ -123,6 +141,38 @@ export function parseSignRequest(payload: Uint8Array): SignRequest {
 }
 
 /**
+ * Inspect one framed request without invoking an agent backend.
+ */
+export function inspectAgentRequest(packet: Uint8Array): AgentRequestInfo {
+  const frame = readFrame(packet);
+  if (!frame || frame.consumed !== packet.length) {
+    return {type: 'invalid'};
+  }
+  const messageType = frame.payload[0];
+  if (messageType === undefined) {
+    return {type: 'invalid'};
+  }
+  if (messageType === AgentMessage.RequestIdentities) {
+    return {type: 'identities'};
+  }
+  if (messageType !== AgentMessage.SignRequest) {
+    return {type: 'unsupported', messageType};
+  }
+
+  try {
+    const request = parseSignRequest(frame.payload);
+    return {
+      type: 'sign',
+      keyBlob: request.keyBlob,
+      bytes: request.data.length,
+      flags: request.flags,
+    };
+  } catch {
+    return {type: 'invalid'};
+  }
+}
+
+/**
  * Map SIGN_REQUEST flags to the requested RSA algorithm, defaulting to
  * rsa-sha2-256 (SHA-1 ssh-rsa is not supported).
  */
@@ -135,8 +185,13 @@ export function rsaFlavorFromFlags(flags: number): 'rsa-sha2-256' | 'rsa-sha2-51
  * backend cannot (unknown key, parse error).
  */
 async function signOrFail(payload: Uint8Array, backend: AgentBackend): Promise<Bytes> {
+  const sign = backend.sign;
+  if (!sign) {
+    return encodeFailure();
+  }
+
   try {
-    return encodeSignResponse(await backend.sign(parseSignRequest(payload)));
+    return encodeSignResponse(await sign(parseSignRequest(payload)));
   } catch {
     return encodeFailure();
   }

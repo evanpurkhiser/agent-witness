@@ -81,6 +81,7 @@ export interface ConnectionSnapshot {
 export interface RemoteSessionOptions {
   pairingStore: PairingStore;
   handleRequest(packet: Bytes): Promise<Bytes>;
+  canProcessBeforeReady?(request: RemoteRequest): boolean;
   onChange(): void;
   onDisconnect(): void;
   onRequestPending?(request: RemoteRequest): void;
@@ -102,6 +103,7 @@ type PendingRequest = Extract<ServerMessage, {type: 'agent_request'}> & {
 export class RemoteSession {
   readonly #pairingStore: PairingStore;
   readonly #handleRequest: (packet: Bytes) => Promise<Bytes>;
+  readonly #canProcessBeforeReady: (request: RemoteRequest) => boolean;
   readonly #onChange: () => void;
   readonly #onDisconnect: () => void;
   readonly #onRequestPending: (request: RemoteRequest) => void;
@@ -154,6 +156,7 @@ export class RemoteSession {
   constructor(options: RemoteSessionOptions) {
     this.#pairingStore = options.pairingStore;
     this.#handleRequest = options.handleRequest;
+    this.#canProcessBeforeReady = options.canProcessBeforeReady ?? (() => false);
     this.#onChange = options.onChange;
     this.#onDisconnect = options.onDisconnect;
     this.#onRequestPending = options.onRequestPending ?? (() => undefined);
@@ -524,11 +527,16 @@ export class RemoteSession {
   }
 
   /**
-   * Start a request when it is still pending, idle, and the agent is ready.
+   * Start a request when it is still pending, idle, and either allowed before
+   * readiness or the agent is ready.
    */
   #tryProcess(socket: WebSocket, key: string): void {
     const pending = this.#pending.get(key);
-    if (!pending || pending.processing || !this.#ready) {
+    if (
+      !pending ||
+      pending.processing ||
+      (!this.#ready && !this.#canProcessBeforeReady(toRemoteRequest(pending)))
+    ) {
       return;
     }
 

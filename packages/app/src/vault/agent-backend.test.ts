@@ -27,14 +27,25 @@ async function unlockedWithKey(): Promise<UnlockedVault> {
 }
 
 describe('vault agent backend', () => {
-  it('lists the vault identities', async () => {
-    const vault = await unlockedWithKey();
+  it('lists no identities without a vault', async () => {
+    const vault = await openVault(await openVaultStore(globalThis.crypto.randomUUID()));
 
-    const identities = await vault.agentBackend().listIdentities();
+    const backend = vault.agentBackend();
+
+    expect(await backend.listIdentities()).toEqual([]);
+    expect(backend.sign).toBeUndefined();
+  });
+
+  it('lists the vault identities while locked', async () => {
+    const vault = (await unlockedWithKey()).lock();
+
+    const backend = vault.agentBackend();
+    const identities = await backend.listIdentities();
 
     expect(identities).toHaveLength(1);
     expect(identities[0].comment).toBe('test@agent-witness');
     expect(identities[0].keyBlob).toEqual(vault.vault.keys[0].publicKey);
+    expect(backend.sign).toBeUndefined();
   });
 
   it('signs a request verifiably against the key it names', async () => {

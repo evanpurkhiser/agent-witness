@@ -6,6 +6,7 @@ import {
   AgentMessage,
   frame,
   handleAgentRequest,
+  inspectAgentRequest,
   parseSignRequest,
   readFrame,
   rsaFlavorFromFlags,
@@ -81,9 +82,37 @@ describe('parseSignRequest', () => {
   });
 });
 
+describe('inspectAgentRequest', () => {
+  it('identifies identity-list requests', () => {
+    expect(inspectAgentRequest(frame(bytes(AgentMessage.RequestIdentities)))).toEqual({
+      type: 'identities',
+    });
+  });
+
+  it('describes signing requests without retaining their payload', () => {
+    const packet = frame(
+      new Writer()
+        .u8(AgentMessage.SignRequest)
+        .string(bytes(1, 2, 3))
+        .string(bytes(4, 5))
+        .u32(SignFlag.RsaSha2_512)
+        .finish(),
+    );
+
+    expect(inspectAgentRequest(packet)).toEqual({
+      type: 'sign',
+      keyBlob: bytes(1, 2, 3),
+      bytes: 2,
+      flags: SignFlag.RsaSha2_512,
+    });
+  });
+});
+
 describe('handleAgentRequest', () => {
   it('answers REQUEST_IDENTITIES with the backend identities', async () => {
-    const backend = echoBackend([{keyBlob: bytes(9, 9, 9), comment: 'my key'}]);
+    const backend = {
+      listIdentities: () => [{keyBlob: bytes(9, 9, 9), comment: 'my key'}],
+    };
 
     const reader = response(
       await handleAgentRequest(bytes(AgentMessage.RequestIdentities), backend),
@@ -111,6 +140,21 @@ describe('handleAgentRequest', () => {
 
   it('fails an unknown request type', async () => {
     const reader = response(await handleAgentRequest(bytes(99), echoBackend()));
+
+    expect(reader.u8()).toBe(AgentMessage.Failure);
+  });
+
+  it('fails when signing is unavailable', async () => {
+    const payload = new Writer()
+      .u8(AgentMessage.SignRequest)
+      .string(bytes(1))
+      .string(bytes(2))
+      .u32(0)
+      .finish();
+
+    const reader = response(
+      await handleAgentRequest(payload, {listIdentities: () => []}),
+    );
 
     expect(reader.u8()).toBe(AgentMessage.Failure);
   });
