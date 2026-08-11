@@ -32,6 +32,7 @@ const labelSchema = z.string().refine(value => {
   return length > 0 && length <= MAX_LABEL_LENGTH;
 }, `label must contain between 1 and ${MAX_LABEL_LENGTH} UTF-8 bytes`);
 const attemptSchema = z.number().int().min(0).max(MAX_U32);
+const deadlineSchema = z.number().int().nonnegative().safe();
 const pushEndpointSchema = z
   .url()
   .refine(
@@ -137,6 +138,7 @@ const serverWireMessageSchema = z.discriminatedUnion('type', [
     type: z.literal('agent_request'),
     request_id: z.uuid(),
     attempt: attemptSchema,
+    deadline: deadlineSchema,
     packet: bytesSchema,
   }),
   z.object({
@@ -171,6 +173,7 @@ const serverMessageSchema = z.discriminatedUnion('type', [
     type: z.literal('agent_request'),
     requestId: z.uuid(),
     attempt: attemptSchema,
+    deadline: deadlineSchema,
     packet: bytesSchema,
   }),
   z.object({

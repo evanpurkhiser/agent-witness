@@ -109,6 +109,7 @@ describe('RemoteSession', () => {
       type: 'agent_request',
       request_id: REQUEST_ID,
       attempt: 2,
+      deadline: 1_800_000_000_000,
       packet: bytes(0, 0, 0, 1, 11),
     });
     await settle();
@@ -150,6 +151,7 @@ describe('RemoteSession', () => {
       type: 'agent_request',
       request_id: REQUEST_ID,
       attempt: 3,
+      deadline: 1_800_000_000_000,
       packet: bytes(0, 0, 0, 1, 11),
     });
     await settle();
@@ -204,11 +206,17 @@ describe('RemoteSession', () => {
       type: 'agent_request',
       request_id: REQUEST_ID,
       attempt: 4,
+      deadline: 1_800_000_000_000,
       packet,
     });
     await settle();
 
-    const request = {requestId: REQUEST_ID, attempt: 4, packet};
+    const request = {
+      requestId: REQUEST_ID,
+      attempt: 4,
+      deadline: 1_800_000_000_000,
+      packet,
+    };
     expect(pending).toHaveBeenCalledWith(request);
     expect(processing).not.toHaveBeenCalled();
 

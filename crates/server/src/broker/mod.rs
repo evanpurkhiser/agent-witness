@@ -45,6 +45,9 @@ pub enum RemoteCommand {
         /// Monotonically increasing dispatch attempt for this request.
         attempt: u32,
 
+        /// Absolute Unix timestamp in milliseconds when the request expires.
+        deadline: u64,
+
         /// Complete length-prefixed SSH-agent packet.
         packet: Bytes,
     },

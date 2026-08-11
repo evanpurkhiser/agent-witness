@@ -69,6 +69,7 @@ impl BrokerState {
                 request_id,
                 packet,
                 deadline,
+                deadline_timestamp,
             } => {
                 if self.pending.len() >= self.max_pending_requests {
                     effects.push(Effect::Complete {
@@ -83,6 +84,7 @@ impl BrokerState {
                         PendingRequest {
                             packet,
                             deadline,
+                            deadline_timestamp,
                             sequence,
                             attempt: 0,
                             state: PendingState::Queued,
@@ -262,6 +264,7 @@ impl BrokerState {
                     session_id,
                     request_id,
                     attempt: pending.attempt,
+                    deadline: pending.deadline_timestamp,
                     packet: pending.packet.clone(),
                 });
                 in_flight += 1;
@@ -335,6 +338,7 @@ impl BrokerState {
 struct PendingRequest {
     packet: Bytes,
     deadline: Instant,
+    deadline_timestamp: u64,
     sequence: u64,
     attempt: u32,
     state: PendingState,
@@ -352,6 +356,7 @@ pub(super) enum Event {
         request_id: RequestId,
         packet: Bytes,
         deadline: Instant,
+        deadline_timestamp: u64,
     },
     Connected {
         session_id: SessionId,
@@ -384,6 +389,7 @@ pub(super) enum Effect {
         session_id: SessionId,
         request_id: RequestId,
         attempt: u32,
+        deadline: u64,
         packet: Bytes,
     },
     Cancel {

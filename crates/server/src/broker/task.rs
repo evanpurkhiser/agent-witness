@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     future,
-    time::Instant,
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use bytes::Bytes;
@@ -246,6 +246,9 @@ impl BrokerActor {
                 request_id,
                 packet,
                 deadline: now + self.config.request_timeout,
+                deadline_timestamp: unix_milliseconds(
+                    SystemTime::now() + self.config.request_timeout,
+                ),
             },
             now,
         );
@@ -343,6 +346,7 @@ impl BrokerActor {
                     session_id,
                     request_id,
                     attempt,
+                    deadline,
                     packet,
                 } => {
                     let sent = self
@@ -355,6 +359,7 @@ impl BrokerActor {
                                 .send(RemoteCommand::Request {
                                     request_id,
                                     attempt,
+                                    deadline,
                                     packet,
                                 })
                                 .is_ok()
@@ -403,4 +408,12 @@ impl BrokerActor {
             let _ = waiter.response.send(Err(RequestError::Unavailable));
         }
     }
+}
+
+fn unix_milliseconds(time: SystemTime) -> u64 {
+    time.duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
 }
