@@ -30,7 +30,7 @@ interface WorkerContextValue {
   registerPushSubscription(subscription: PushSubscriptionRegistration): Promise<boolean>;
   lock(): Promise<boolean>;
   destroy(): Promise<boolean>;
-  addKey(pem: string): Promise<boolean>;
+  addKey(pem: string, name?: string): Promise<boolean>;
   removeKey(keyId: string): Promise<boolean>;
 }
 
@@ -144,7 +144,10 @@ export function WorkerProvider({children}: {children: ReactNode}) {
   );
   const lock = useCallback(() => run(() => worker.lock()), [run]);
   const destroy = useCallback(() => run(() => worker.destroy()), [run]);
-  const addKey = useCallback((pem: string) => run(() => worker.addKey(pem)), [run]);
+  const addKey = useCallback(
+    (pem: string, name?: string) => run(() => worker.addKey(pem, name)),
+    [run],
+  );
   const removeKey = useCallback(
     (keyId: string) => run(() => worker.removeKey(keyId)),
     [run],
