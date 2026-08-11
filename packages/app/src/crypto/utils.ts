@@ -17,11 +17,10 @@ export async function seal(
   additionalData?: Bytes,
 ): Promise<Bytes> {
   const iv = random(12);
-  const ciphertext = await subtle.wrapKey(format, key, wrappingKey, {
-    name: 'AES-GCM',
-    iv,
-    additionalData,
-  });
+  const algorithm: AesGcmParams = additionalData
+    ? {name: 'AES-GCM', iv, additionalData}
+    : {name: 'AES-GCM', iv};
+  const ciphertext = await subtle.wrapKey(format, key, wrappingKey, algorithm);
   return concatBytes(iv, new Uint8Array(ciphertext));
 }
 
@@ -41,11 +40,15 @@ export function unseal(
   usages: KeyUsage[],
   additionalData?: Bytes,
 ): Promise<CryptoKey> {
+  const algorithm: AesGcmParams = additionalData
+    ? {name: 'AES-GCM', iv: blob.subarray(0, 12), additionalData}
+    : {name: 'AES-GCM', iv: blob.subarray(0, 12)};
+
   return subtle.unwrapKey(
     format,
     blob.subarray(12),
     wrappingKey,
-    {name: 'AES-GCM', iv: blob.subarray(0, 12), additionalData},
+    algorithm,
     importParams,
     false,
     usages,
