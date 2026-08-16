@@ -6,6 +6,7 @@ import * as Comlink from 'comlink';
 
 import {
   type RemoteRequest,
+  type RemoteRequestOutcome,
   RemoteSession,
   type PushSubscriptionRegistration,
 } from 'app/remote/session';
@@ -30,8 +31,17 @@ import {
   type VaultState,
 } from 'app/vault/vault';
 
-import {type StateListener, toSnapshot, type WorkerApi, type WorkerSnapshot} from './api';
+import {
+  type AuthorizationRequestView,
+  type SettledAuthorizationView,
+  type StateListener,
+  toSnapshot,
+  type WorkerApi,
+  type WorkerSnapshot,
+} from './api';
 import type {AgentEvent, NewAgentEvent, VaultLockReason} from './events';
+
+const MAX_SETTLED_AUTHORIZATIONS = 64;
 
 /**
  * Owns the vault and remote agent session, exposing only display-safe snapshots
@@ -43,6 +53,7 @@ class WorkerSession implements WorkerApi {
   #events: AgentEvent[] | null = null;
   #eventWrite: Promise<void> = Promise.resolve();
   #listener: StateListener | null = null;
+  #settledAuthorizations = new Map<string, SettledAuthorizationView>();
   readonly #remote = new RemoteSession({
     pairingStore: {
       loadPairing: endpoint =>
@@ -55,6 +66,8 @@ class WorkerSession implements WorkerApi {
     handleRequest: packet => this.#handleRequest(packet),
     canProcessBeforeReady: request =>
       inspectAgentRequest(request.packet).type === 'identities',
+    onRequestSettled: (request, outcome) =>
+      this.#recordSettledAuthorization(request, outcome),
     onChange: () => void this.#publish(),
     onDisconnect: () => void this.#handleDisconnect(),
     onRequestPending: request => void this.#recordPendingRequest(request),
@@ -81,11 +94,71 @@ class WorkerSession implements WorkerApi {
   }
 
   async #snapshot(): Promise<WorkerSnapshot> {
+    const state = await this.#current();
+
     return {
-      vault: toSnapshot(await this.#current()),
+      vault: toSnapshot(state),
       connection: this.#remote.snapshot(),
       events: [...(await this.#currentEvents())],
+      authorizationRequests: this.#authorizationRequests(state),
+      settledAuthorizations: [...this.#settledAuthorizations.values()],
     };
+  }
+
+  #recordSettledAuthorization(
+    request: RemoteRequest,
+    status: RemoteRequestOutcome,
+  ): void {
+    if (!signingRequest(request.packet)) {
+      return;
+    }
+
+    const settled = {
+      id: request.requestId,
+      attempt: request.attempt,
+      status,
+      settledAt: Date.now(),
+    };
+    this.#settledAuthorizations.set(requestKey(request), settled);
+
+    if (this.#settledAuthorizations.size <= MAX_SETTLED_AUTHORIZATIONS) {
+      return;
+    }
+
+    const oldest = this.#settledAuthorizations.keys().next().value;
+    if (oldest) {
+      this.#settledAuthorizations.delete(oldest);
+    }
+  }
+
+  #authorizationRequests(state: VaultState): AuthorizationRequestView[] {
+    if (state.status === 'no-vault') {
+      return [];
+    }
+
+    return this.#remote.pendingRequests().flatMap(request => {
+      const signing = signingRequest(request.packet);
+      if (!signing) {
+        return [];
+      }
+
+      const key = state.vault.keys.find(candidate =>
+        bytesEqual(candidate.publicKey, signing.keyBlob),
+      );
+      if (!key) {
+        return [];
+      }
+
+      return [
+        {
+          id: request.requestId,
+          attempt: request.attempt,
+          requestedAt: request.requestedAt,
+          deadline: request.deadline,
+          key: {id: key.id, name: key.name},
+        },
+      ];
+    });
   }
 
   async #publish(): Promise<WorkerSnapshot> {
@@ -279,6 +352,10 @@ function signingRequest(packet: Bytes) {
   } catch {
     return null;
   }
+}
+
+function requestKey(request: Pick<RemoteRequest, 'requestId' | 'attempt'>): string {
+  return `${request.requestId}:${request.attempt}`;
 }
 
 Comlink.expose(new WorkerSession());

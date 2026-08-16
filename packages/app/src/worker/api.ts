@@ -51,12 +51,35 @@ export type VaultSnapshot =
   | {status: 'unlocked'; vault: VaultView};
 
 /**
+ * An active signing request with only the metadata needed by the page.
+ */
+export interface AuthorizationRequestView {
+  id: string;
+  attempt: number;
+  requestedAt: number;
+  deadline: number;
+  key: Pick<KeyView, 'id' | 'name'>;
+}
+
+/**
+ * A signing request that reached a terminal outcome.
+ */
+export interface SettledAuthorizationView {
+  id: string;
+  attempt: number;
+  status: 'signed' | 'expired' | 'canceled';
+  settledAt: number;
+}
+
+/**
  * The complete display-safe state published by the worker.
  */
 export interface WorkerSnapshot {
   vault: VaultSnapshot;
   connection: ConnectionSnapshot;
   events: AgentEvent[];
+  authorizationRequests: AuthorizationRequestView[];
+  settledAuthorizations: SettledAuthorizationView[];
 }
 
 export type StateListener = (snapshot: WorkerSnapshot) => void;
