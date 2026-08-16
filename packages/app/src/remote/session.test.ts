@@ -288,63 +288,6 @@ describe('RemoteSession', () => {
     expect(settled).toHaveBeenCalledWith(request, 'expired');
   });
 
-  it('reports request lifecycle transitions with request context', async () => {
-    const pending = vi.fn();
-    const processing = vi.fn();
-    const closed = vi.fn();
-    const sockets: FakeSocket[] = [];
-    const session = new RemoteSession({
-      pairingStore: new MemoryPairingStore(pairing()),
-      handleRequest: () => Promise.resolve(bytes(0, 0, 0, 1, 5)),
-      onChange() {},
-      onDisconnect() {},
-      onRequestPending: pending,
-      onRequestProcessing: processing,
-      onRequestClosed: closed,
-      createSocket: endpoint => {
-        const socket = new FakeSocket(endpoint);
-        sockets.push(socket);
-        return socket as unknown as WebSocket;
-      },
-    });
-    await session.connect(ENDPOINT, 'Browser');
-    const socket = sockets[0]!;
-    socket.open();
-    socket.receive({
-      type: 'authenticated',
-      server_id: SERVER_ID,
-      session_id: SESSION_ID,
-      vapid_public_key: VAPID_PUBLIC_KEY,
-    });
-    await settle();
-
-    const packet = signPacket();
-    socket.receive({
-      type: 'agent_request',
-      request_id: REQUEST_ID,
-      attempt: 5,
-      requested_at: 1_799_999_910_000,
-      deadline: 1_800_000_000_000,
-      packet,
-    });
-    await settle();
-
-    const request = {
-      requestId: REQUEST_ID,
-      attempt: 5,
-      requestedAt: 1_799_999_910_000,
-      deadline: 1_800_000_000_000,
-      packet,
-    };
-    expect(pending).toHaveBeenCalledWith(request);
-    expect(processing).not.toHaveBeenCalled();
-
-    socket.receive({type: 'cancel_request', request_id: REQUEST_ID, attempt: 5});
-    await settle();
-
-    expect(closed).toHaveBeenCalledWith(expect.objectContaining(request));
-  });
-
   it('answers application heartbeats', async () => {
     const {socket} = await connectSession({
       store: new MemoryPairingStore(pairing()),

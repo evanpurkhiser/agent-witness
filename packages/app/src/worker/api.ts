@@ -7,8 +7,6 @@ import type {Bytes} from 'app/utils/bytes';
 import type {KeyType, Vault} from 'app/vault/types';
 import type {CreateVaultParams, VaultState} from 'app/vault/vault';
 
-import type {AgentEvent} from './events';
-
 /**
  * A passkey as shown to the page: enough to drive the WebAuthn unlock, minus
  * the wrapped master key.
@@ -77,7 +75,6 @@ export interface SettledAuthorizationView {
 export interface WorkerSnapshot {
   vault: VaultSnapshot;
   connection: ConnectionSnapshot;
-  events: AgentEvent[];
   authorizationRequests: AuthorizationRequestView[];
   settledAuthorizations: SettledAuthorizationView[];
 }

@@ -4,7 +4,7 @@ import {describe, expect, it} from 'vitest';
 
 import type {PairingRecord} from 'app/remote/session';
 
-import {MAX_STORED_AGENT_EVENTS, openVaultStore} from './storage';
+import {openVaultStore} from './storage';
 import type {EncryptedKey, Vault} from './types';
 
 /**
@@ -115,37 +115,30 @@ describe('VaultStore', () => {
     expect(await store.loadPairing(pairing.endpoint)).toBeNull();
   });
 
-  it('persists agent events chronologically', async () => {
-    const store = await freshStore();
-
-    await store.appendAgentEvent({id: 'later', at: 200, type: 'vault_unlocked'});
-    await store.appendAgentEvent({
-      id: 'earlier',
-      at: 100,
-      type: 'vault_locked',
-      reason: 'manual',
+  it('removes the legacy event store during upgrade', async () => {
+    const name = globalThis.crypto.randomUUID();
+    const legacy = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(name, 3);
+      request.onerror = () => reject(request.error);
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore('vault');
+        request.result.createObjectStore('keys', {keyPath: 'keyId'});
+        request.result.createObjectStore('pairings', {keyPath: 'endpoint'});
+        request.result.createObjectStore('events', {keyPath: 'id'});
+      };
+      request.onsuccess = () => resolve(request.result);
     });
+    legacy.close();
 
-    expect(await store.loadAgentEvents()).toEqual([
-      {id: 'earlier', at: 100, type: 'vault_locked', reason: 'manual'},
-      {id: 'later', at: 200, type: 'vault_unlocked'},
-    ]);
-  });
+    await openVaultStore(name);
 
-  it('prunes the oldest agent events beyond the retention limit', async () => {
-    const store = await freshStore();
-
-    for (let index = 0; index <= MAX_STORED_AGENT_EVENTS; index += 1) {
-      await store.appendAgentEvent({
-        id: String(index).padStart(3, '0'),
-        at: index,
-        type: 'vault_unlocked',
-      });
-    }
-
-    const events = await store.loadAgentEvents();
-    expect(events).toHaveLength(MAX_STORED_AGENT_EVENTS);
-    expect(events[0]).toMatchObject({id: '001', at: 1});
+    const upgraded = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(name);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    expect(upgraded.objectStoreNames.contains('events')).toBe(false);
+    upgraded.close();
   });
 
   it('destroys the vault and all keys', async () => {

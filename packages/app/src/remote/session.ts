@@ -88,9 +88,6 @@ export interface RemoteSessionOptions {
   onRequestSettled?(request: RemoteRequest, outcome: RemoteRequestOutcome): void;
   onChange(): void;
   onDisconnect(): void;
-  onRequestPending?(request: RemoteRequest): void;
-  onRequestProcessing?(request: RemoteRequest): void;
-  onRequestClosed?(request: RemoteRequest): void;
   createSocket?: (endpoint: string) => WebSocket;
 }
 
@@ -114,9 +111,6 @@ export class RemoteSession {
   ) => void;
   readonly #onChange: () => void;
   readonly #onDisconnect: () => void;
-  readonly #onRequestPending: (request: RemoteRequest) => void;
-  readonly #onRequestProcessing: (request: RemoteRequest) => void;
-  readonly #onRequestClosed: (request: RemoteRequest) => void;
   readonly #createSocket: (endpoint: string) => WebSocket;
 
   #socket: WebSocket | null = null;
@@ -168,9 +162,6 @@ export class RemoteSession {
     this.#onRequestSettled = options.onRequestSettled ?? (() => {});
     this.#onChange = options.onChange;
     this.#onDisconnect = options.onDisconnect;
-    this.#onRequestPending = options.onRequestPending ?? (() => undefined);
-    this.#onRequestProcessing = options.onRequestProcessing ?? (() => undefined);
-    this.#onRequestClosed = options.onRequestClosed ?? (() => undefined);
     this.#createSocket = options.createSocket ?? (endpoint => new WebSocket(endpoint));
   }
 
@@ -514,7 +505,6 @@ export class RemoteSession {
       ...message,
       processing: false,
     });
-    this.#onRequestPending(toRemoteRequest(message));
     this.#pendingChanged();
 
     this.#tryProcess(socket, key);
@@ -531,7 +521,6 @@ export class RemoteSession {
     }
 
     this.#pending.delete(key);
-    this.#onRequestClosed(toRemoteRequest(pending));
     this.#onRequestSettled(
       toRemoteRequest(pending),
       Date.now() >= pending.deadline ? 'expired' : 'canceled',
@@ -561,7 +550,6 @@ export class RemoteSession {
     }
 
     pending.processing = true;
-    this.#onRequestProcessing(toRemoteRequest(pending));
     void this.#handleRequest(pending.packet)
       .then(packet => {
         if (socket !== this.#socket || this.#pending.get(key) !== pending) {

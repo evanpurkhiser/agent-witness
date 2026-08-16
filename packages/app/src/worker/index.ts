@@ -19,11 +19,7 @@ import {
 } from 'app/ssh/agent';
 import type {Bytes} from 'app/utils/bytes';
 import {bytesEqual} from 'app/utils/bytes';
-import {
-  MAX_STORED_AGENT_EVENTS,
-  openVaultStore,
-  type VaultStore,
-} from 'app/vault/storage';
+import {openVaultStore, type VaultStore} from 'app/vault/storage';
 import {
   assertVaultStatus,
   type CreateVaultParams,
@@ -39,7 +35,6 @@ import {
   type WorkerApi,
   type WorkerSnapshot,
 } from './api';
-import type {AgentEvent, NewAgentEvent, VaultLockReason} from './events';
 
 const MAX_SETTLED_AUTHORIZATIONS = 64;
 
@@ -50,8 +45,6 @@ const MAX_SETTLED_AUTHORIZATIONS = 64;
 class WorkerSession implements WorkerApi {
   #store: VaultStore | null = null;
   #state: VaultState | null = null;
-  #events: AgentEvent[] | null = null;
-  #eventWrite: Promise<void> = Promise.resolve();
   #listener: StateListener | null = null;
   #settledAuthorizations = new Map<string, SettledAuthorizationView>();
   readonly #remote = new RemoteSession({
@@ -70,9 +63,6 @@ class WorkerSession implements WorkerApi {
       this.#recordSettledAuthorization(request, outcome),
     onChange: () => void this.#publish(),
     onDisconnect: () => void this.#handleDisconnect(),
-    onRequestPending: request => void this.#recordPendingRequest(request),
-    onRequestProcessing: request => void this.#recordSigningRequest(request),
-    onRequestClosed: request => void this.#recordClosedRequest(request),
   });
 
   async #currentStore(): Promise<VaultStore> {
@@ -88,18 +78,12 @@ class WorkerSession implements WorkerApi {
     return this.#state;
   }
 
-  async #currentEvents(): Promise<AgentEvent[]> {
-    this.#events ??= await (await this.#currentStore()).loadAgentEvents();
-    return this.#events;
-  }
-
   async #snapshot(): Promise<WorkerSnapshot> {
     const state = await this.#current();
 
     return {
       vault: toSnapshot(state),
       connection: this.#remote.snapshot(),
-      events: [...(await this.#currentEvents())],
       authorizationRequests: this.#authorizationRequests(state),
       settledAuthorizations: [...this.#settledAuthorizations.values()],
     };
@@ -177,79 +161,17 @@ class WorkerSession implements WorkerApi {
     return handleAgentRequest(request.payload, state.agentBackend());
   }
 
-  #record(event: NewAgentEvent): Promise<void> {
-    const write = this.#eventWrite.then(() => this.#appendEvent(event));
-    this.#eventWrite = write.catch(() => undefined);
-    return write;
-  }
-
-  async #appendEvent(event: NewAgentEvent): Promise<void> {
-    const recorded = {...event, id: crypto.randomUUID(), at: Date.now()} as AgentEvent;
-    const events = await this.#currentEvents();
-    events.push(recorded);
-    if (events.length > MAX_STORED_AGENT_EVENTS) {
-      events.splice(0, events.length - MAX_STORED_AGENT_EVENTS);
-    }
-
-    await (await this.#currentStore()).appendAgentEvent(recorded).catch(() => undefined);
-    await this.#publish();
-  }
-
-  async #recordPendingRequest(request: RemoteRequest): Promise<void> {
-    const signing = signingRequest(request.packet);
-    if (!signing) {
-      return;
-    }
-
-    await this.#record({
-      type: 'request_pending',
-      requestId: request.requestId,
-      bytes: signing.data.length,
-    });
-  }
-
-  async #recordSigningRequest(request: RemoteRequest): Promise<void> {
-    const signing = signingRequest(request.packet);
-    const state = await this.#current();
-    if (!signing || state.status === 'no-vault') {
-      return;
-    }
-
-    const key = state.vault.keys.find(candidate =>
-      bytesEqual(candidate.publicKey, signing.keyBlob),
-    );
-    if (!key) {
-      return;
-    }
-
-    await this.#record({
-      type: 'request_signing',
-      requestId: request.requestId,
-      bytes: signing.data.length,
-      fingerprint: key.fingerprint,
-    });
-  }
-
-  async #recordClosedRequest(request: RemoteRequest): Promise<void> {
-    if (!signingRequest(request.packet)) {
-      return;
-    }
-
-    await this.#record({type: 'request_closed', requestId: request.requestId});
-  }
-
-  async #lock(reason: VaultLockReason): Promise<void> {
+  #lock(): void {
     if (this.#state?.status !== 'unlocked') {
       return;
     }
 
     this.#state = this.#state.lock();
     this.#remote.setReady(false);
-    await this.#record({type: 'vault_locked', reason});
   }
 
   async #handleDisconnect(): Promise<void> {
-    await this.#lock('disconnected');
+    this.#lock();
     await this.#publish();
   }
 
@@ -269,9 +191,9 @@ class WorkerSession implements WorkerApi {
     return this.#snapshot();
   }
 
-  async setConnectionActive(active: boolean): Promise<WorkerSnapshot> {
+  setConnectionActive(active: boolean): Promise<WorkerSnapshot> {
     if (!active) {
-      await this.#lock('backgrounded');
+      this.#lock();
     }
 
     this.#remote.setActive(active);
@@ -294,7 +216,6 @@ class WorkerSession implements WorkerApi {
     const state = await this.#current();
     assertVaultStatus(state, 'no-vault');
     this.#state = await state.createVault(params);
-    await this.#record({type: 'vault_unlocked'});
     this.#remote.setReady(true);
     return this.#publish();
   }
@@ -303,14 +224,13 @@ class WorkerSession implements WorkerApi {
     const state = await this.#current();
     assertVaultStatus(state, 'locked');
     this.#state = await state.unlock(prfOutput);
-    await this.#record({type: 'vault_unlocked'});
     this.#remote.setReady(true);
     return this.#publish();
   }
 
   async lock(): Promise<WorkerSnapshot> {
     await this.#current();
-    await this.#lock('manual');
+    this.#lock();
     return this.#snapshot();
   }
 
