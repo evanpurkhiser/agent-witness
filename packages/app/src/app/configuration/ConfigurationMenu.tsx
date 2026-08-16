@@ -4,10 +4,14 @@ import {Dialog} from '@base-ui/react/dialog';
 import {Menu} from '@base-ui/react/menu';
 import {motion} from 'framer-motion';
 
+import type {ThemeMode} from '../theme';
+import {useThemeMode} from '../useThemeMode';
+
 import {KeyList} from './KeyList';
 
 export function ConfigurationMenu() {
   const [sshKeysOpen, setSshKeysOpen] = useState(false);
+  const [themeMode, selectThemeMode] = useThemeMode();
   const dialogRef = useRef<HTMLDivElement>(null);
 
   return (
@@ -48,21 +52,61 @@ export function ConfigurationMenu() {
               }
               className="border-border bg-surface min-w-48 rounded-lg border p-1.5 font-mono shadow-xl outline-none"
             >
+              <Menu.SubmenuRoot>
+                <Menu.SubmenuTrigger className="text-foreground data-[highlighted]:bg-surface-hover data-[popup-open]:bg-surface-hover flex min-h-10 cursor-default items-center justify-between gap-6 rounded-md px-3 text-xs outline-none">
+                  Theme
+                  <Chevron />
+                </Menu.SubmenuTrigger>
+
+                <Menu.Portal>
+                  <Menu.Positioner
+                    side="left"
+                    align="end"
+                    sideOffset={4}
+                    collisionPadding={16}
+                    positionMethod="fixed"
+                    className="z-30"
+                  >
+                    <Menu.Popup
+                      finalFocus={false}
+                      render={
+                        <motion.div
+                          initial={{opacity: 0, scale: 0.95}}
+                          animate={{opacity: 1, scale: 1}}
+                          transition={{duration: 0.15, ease: 'easeOut'}}
+                          style={{transformOrigin: 'bottom right'}}
+                        />
+                      }
+                      className="border-border bg-surface min-w-40 rounded-lg border p-1.5 font-mono shadow-xl outline-none"
+                    >
+                      <Menu.RadioGroup
+                        value={themeMode}
+                        onValueChange={value => selectThemeMode(value as ThemeMode)}
+                      >
+                        {(['system', 'light', 'dark'] as const).map(mode => (
+                          <Menu.RadioItem
+                            key={mode}
+                            value={mode}
+                            className="text-foreground data-[highlighted]:bg-surface-hover grid min-h-10 cursor-default grid-cols-[1rem_1fr] items-center gap-2 rounded-md px-3 text-xs capitalize outline-none"
+                          >
+                            <Menu.RadioItemIndicator className="text-foreground grid size-4 place-items-center">
+                              <Check />
+                            </Menu.RadioItemIndicator>
+                            <span className="col-start-2">{mode}</span>
+                          </Menu.RadioItem>
+                        ))}
+                      </Menu.RadioGroup>
+                    </Menu.Popup>
+                  </Menu.Positioner>
+                </Menu.Portal>
+              </Menu.SubmenuRoot>
+
               <Menu.Item
                 className="text-foreground data-[highlighted]:bg-surface-hover flex min-h-10 cursor-default items-center justify-between gap-6 rounded-md px-3 text-xs outline-none"
                 onClick={() => setSshKeysOpen(true)}
               >
                 SSH keys
-                <svg
-                  aria-hidden="true"
-                  viewBox="0 0 16 16"
-                  className="text-foreground-faint size-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                >
-                  <path d="m6 3 5 5-5 5" />
-                </svg>
+                <Chevron />
               </Menu.Item>
             </Menu.Popup>
           </Menu.Positioner>
@@ -109,5 +153,35 @@ export function ConfigurationMenu() {
         </Dialog.Portal>
       </Dialog.Root>
     </>
+  );
+}
+
+function Chevron() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="text-foreground-faint size-3.5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      <path d="m6 3 5 5-5 5" />
+    </svg>
+  );
+}
+
+function Check() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="size-3.5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+    >
+      <path d="m3 8 3 3 7-7" />
+    </svg>
   );
 }
