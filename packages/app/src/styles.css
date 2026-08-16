@@ -41,7 +41,7 @@
     --text-subtle: var(--color-zinc-400);
     --text-faint: var(--color-zinc-500);
     --text-disabled: var(--color-zinc-600);
-    --primary: var(--color-zinc-50);
+    --primary: var(--color-zinc-200);
     --primary-foreground: var(--color-zinc-950);
     --danger: var(--color-red-400);
     --danger-subtle: var(--color-red-400);

@@ -2,6 +2,8 @@ import type {ConnectionSnapshot} from 'app/remote/session';
 import type {VaultSnapshot} from 'app/worker/api';
 import type {AgentEvent} from 'app/worker/events';
 
+import {ConfigurationMenu} from '../configuration/ConfigurationMenu';
+
 import {AuthorizeButton} from './AuthorizeButton';
 import {ConnectionStatus} from './ConnectionStatus';
 import {EventLog} from './EventLog';
@@ -34,7 +36,10 @@ export function SigningScreen({
           working={working}
           onAuthorize={onAuthorize}
         />
-        <ConnectionStatus status={connection.status} />
+        <div className="flex items-center justify-between">
+          <ConnectionStatus status={connection.status} />
+          <ConfigurationMenu />
+        </div>
       </footer>
     </main>
   );
