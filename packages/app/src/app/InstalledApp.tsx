@@ -53,7 +53,7 @@ function InstalledAppContent() {
     );
   }
 
-  const {connection, events, vault} = snapshot;
+  const {authorizationRequests, connection, settledAuthorizations, vault} = snapshot;
 
   if (
     vault.status !== 'no-vault' &&
@@ -63,7 +63,8 @@ function InstalledAppContent() {
     return (
       <SigningScreen
         connection={connection}
-        events={events}
+        authorizationRequests={authorizationRequests}
+        settledAuthorizations={settledAuthorizations}
         vault={vault}
         working={working}
         error={error}

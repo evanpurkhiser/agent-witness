@@ -1,16 +1,20 @@
 import type {ConnectionSnapshot} from 'app/remote/session';
-import type {VaultSnapshot} from 'app/worker/api';
-import type {AgentEvent} from 'app/worker/events';
+import type {
+  AuthorizationRequestView,
+  SettledAuthorizationView,
+  VaultSnapshot,
+} from 'app/worker/api';
 
 import {ConfigurationMenu} from '../configuration/ConfigurationMenu';
 
+import {AuthorizationRequestList} from './AuthorizationRequestList';
 import {AuthorizeButton} from './AuthorizeButton';
 import {ConnectionStatus} from './ConnectionStatus';
-import {EventLog} from './EventLog';
 
 interface SigningScreenProps {
   connection: ConnectionSnapshot;
-  events: AgentEvent[];
+  authorizationRequests: AuthorizationRequestView[];
+  settledAuthorizations: SettledAuthorizationView[];
   vault: Exclude<VaultSnapshot, {status: 'no-vault'}>;
   working: boolean;
   error: string | null;
@@ -19,7 +23,8 @@ interface SigningScreenProps {
 
 export function SigningScreen({
   connection,
-  events,
+  authorizationRequests,
+  settledAuthorizations,
   vault,
   working,
   error,
@@ -27,11 +32,15 @@ export function SigningScreen({
 }: SigningScreenProps) {
   return (
     <main className="bg-canvas text-foreground fixed inset-0 grid grid-rows-[minmax(0,1fr)_auto] gap-3 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(0.75rem,env(safe-area-inset-bottom))] font-mono">
-      <EventLog events={events} error={error ?? connection.error} />
+      <AuthorizationRequestList
+        requests={authorizationRequests}
+        settled={settledAuthorizations}
+        error={error ?? connection.error}
+      />
 
       <footer className="grid gap-3">
         <AuthorizeButton
-          pendingRequests={connection.pendingRequests}
+          pendingRequests={authorizationRequests.length}
           vaultStatus={vault.status}
           working={working}
           onAuthorize={onAuthorize}

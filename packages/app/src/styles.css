@@ -22,6 +22,18 @@
   --danger-subtle: var(--color-red-400);
   --warning: var(--color-amber-50);
   --warning-foreground: var(--color-amber-950);
+  --request-surface: color-mix(in srgb, var(--color-orange-50) 82%, var(--surface));
+  --request-border: var(--color-orange-300);
+  --request-accent: var(--color-orange-600);
+  --request-muted: var(--color-orange-800);
+  --signed-surface: color-mix(in srgb, var(--color-green-50) 82%, var(--surface));
+  --signed-border: var(--color-green-300);
+  --signed-accent: var(--color-green-600);
+  --signed-muted: var(--color-green-800);
+  --expired-surface: color-mix(in srgb, var(--color-red-50) 82%, var(--surface));
+  --expired-border: var(--color-red-300);
+  --expired-accent: var(--color-red-600);
+  --expired-muted: var(--color-red-800);
   --overlay: color-mix(in srgb, var(--color-zinc-950) 30%, transparent);
 }
 
@@ -47,6 +59,18 @@
     --danger-subtle: var(--color-red-400);
     --warning: color-mix(in srgb, var(--color-amber-950) 55%, var(--color-zinc-950));
     --warning-foreground: var(--color-amber-100);
+    --request-surface: color-mix(in srgb, var(--color-orange-950) 45%, var(--surface));
+    --request-border: var(--color-orange-800);
+    --request-accent: var(--color-orange-400);
+    --request-muted: var(--color-orange-200);
+    --signed-surface: color-mix(in srgb, var(--color-green-950) 45%, var(--surface));
+    --signed-border: var(--color-green-800);
+    --signed-accent: var(--color-green-400);
+    --signed-muted: var(--color-green-200);
+    --expired-surface: color-mix(in srgb, var(--color-red-950) 45%, var(--surface));
+    --expired-border: var(--color-red-800);
+    --expired-accent: var(--color-red-400);
+    --expired-muted: var(--color-red-200);
     --overlay: color-mix(in srgb, var(--color-black) 60%, transparent);
   }
 }
@@ -72,6 +96,18 @@
   --color-danger-subtle: var(--danger-subtle);
   --color-warning: var(--warning);
   --color-warning-foreground: var(--warning-foreground);
+  --color-request-surface: var(--request-surface);
+  --color-request-border: var(--request-border);
+  --color-request-accent: var(--request-accent);
+  --color-request-muted: var(--request-muted);
+  --color-signed-surface: var(--signed-surface);
+  --color-signed-border: var(--signed-border);
+  --color-signed-accent: var(--signed-accent);
+  --color-signed-muted: var(--signed-muted);
+  --color-expired-surface: var(--expired-surface);
+  --color-expired-border: var(--expired-border);
+  --color-expired-accent: var(--expired-accent);
+  --color-expired-muted: var(--expired-muted);
   --color-overlay: var(--overlay);
 }
 
