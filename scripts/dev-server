@@ -2,7 +2,8 @@
 
 set -euo pipefail
 
-readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly ROOT_DIR
 readonly BACKEND_URL="http://127.0.0.1:19345"
 readonly VITE_PORT=5173
 
