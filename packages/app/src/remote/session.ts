@@ -62,6 +62,8 @@ export interface RemoteRequest {
   packet: Bytes;
 }
 
+export type RemoteRequestOutcome = 'signed' | 'expired' | 'canceled';
+
 // REVIEW: Make this a discriminated union so status-specific fields do not
 // require null placeholders.
 /**
@@ -83,6 +85,7 @@ export interface RemoteSessionOptions {
   pairingStore: PairingStore;
   handleRequest(packet: Bytes): Promise<Bytes>;
   canProcessBeforeReady?(request: RemoteRequest): boolean;
+  onRequestSettled?(request: RemoteRequest, outcome: RemoteRequestOutcome): void;
   onChange(): void;
   onDisconnect(): void;
   onRequestPending?(request: RemoteRequest): void;
@@ -105,6 +108,10 @@ export class RemoteSession {
   readonly #pairingStore: PairingStore;
   readonly #handleRequest: (packet: Bytes) => Promise<Bytes>;
   readonly #canProcessBeforeReady: (request: RemoteRequest) => boolean;
+  readonly #onRequestSettled: (
+    request: RemoteRequest,
+    outcome: RemoteRequestOutcome,
+  ) => void;
   readonly #onChange: () => void;
   readonly #onDisconnect: () => void;
   readonly #onRequestPending: (request: RemoteRequest) => void;
@@ -158,6 +165,7 @@ export class RemoteSession {
     this.#pairingStore = options.pairingStore;
     this.#handleRequest = options.handleRequest;
     this.#canProcessBeforeReady = options.canProcessBeforeReady ?? (() => false);
+    this.#onRequestSettled = options.onRequestSettled ?? (() => {});
     this.#onChange = options.onChange;
     this.#onDisconnect = options.onDisconnect;
     this.#onRequestPending = options.onRequestPending ?? (() => undefined);
@@ -171,6 +179,13 @@ export class RemoteSession {
    */
   snapshot(): ConnectionSnapshot {
     return {...this.#snapshot};
+  }
+
+  /**
+   * Return copies of the requests currently buffered or being processed.
+   */
+  pendingRequests(): RemoteRequest[] {
+    return Array.from(this.#pending.values(), toRemoteRequest);
   }
 
   /**
@@ -517,6 +532,10 @@ export class RemoteSession {
 
     this.#pending.delete(key);
     this.#onRequestClosed(toRemoteRequest(pending));
+    this.#onRequestSettled(
+      toRemoteRequest(pending),
+      Date.now() >= pending.deadline ? 'expired' : 'canceled',
+    );
     this.#pendingChanged();
   }
 
@@ -555,6 +574,7 @@ export class RemoteSession {
           attempt: pending.attempt,
           packet,
         });
+        this.#onRequestSettled(toRemoteRequest(pending), 'signed');
         this.#pending.delete(key);
         this.#pendingChanged();
       })

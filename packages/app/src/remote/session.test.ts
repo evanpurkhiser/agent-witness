@@ -4,7 +4,13 @@ import {describe, expect, it, vi} from 'vitest';
 import {inspectAgentRequest} from 'app/ssh/agent';
 import type {Bytes} from 'app/utils/bytes';
 
-import {type PairingRecord, type PairingStore, RemoteSession} from './session';
+import {
+  type PairingRecord,
+  type PairingStore,
+  type RemoteRequest,
+  type RemoteRequestOutcome,
+  RemoteSession,
+} from './session';
 
 const SERVER_ID = '11111111-2222-4333-8444-555555555555';
 const CLIENT_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
@@ -135,7 +141,12 @@ describe('RemoteSession', () => {
   it('buffers signing requests while locked and drains them after unlock', async () => {
     const store = new MemoryPairingStore(pairing());
     const handleRequest = vi.fn(() => Promise.resolve(bytes(0, 0, 0, 1, 12)));
-    const {session, socket} = await connectSession({store, handleRequest});
+    const settled = vi.fn();
+    const {session, socket} = await connectSession({
+      store,
+      handleRequest,
+      onRequestSettled: settled,
+    });
     socket.receive({
       type: 'authenticated',
       server_id: SERVER_ID,
@@ -168,16 +179,23 @@ describe('RemoteSession', () => {
       packet: bytes(0, 0, 0, 1, 12),
     });
     expect(session.snapshot().pendingRequests).toBe(0);
+    expect(settled).toHaveBeenCalledWith(
+      expect.objectContaining({requestId: REQUEST_ID, attempt: 2}),
+      'signed',
+    );
   });
 
   it('suppresses a response cancelled during processing', async () => {
     const store = new MemoryPairingStore(pairing());
+    const settled = vi.fn();
+    const deadline = Date.now() + 60_000;
     let finish!: (packet: Bytes) => void;
     const handleRequest = vi.fn(() => new Promise<Bytes>(resolve => (finish = resolve)));
     const {session, socket} = await connectSession({
       store,
       ready: true,
       handleRequest,
+      onRequestSettled: settled,
     });
     socket.receive({
       type: 'authenticated',
@@ -192,7 +210,7 @@ describe('RemoteSession', () => {
       request_id: REQUEST_ID,
       attempt: 3,
       requested_at: 1_799_999_910_000,
-      deadline: 1_800_000_000_000,
+      deadline,
       packet: bytes(0, 0, 0, 1, 11),
     });
     await settle();
@@ -210,6 +228,64 @@ describe('RemoteSession', () => {
     expect(sentMessages(socket)).not.toContainEqual(
       expect.objectContaining({type: 'agent_response'}),
     );
+    expect(settled).toHaveBeenCalledWith(
+      expect.objectContaining({requestId: REQUEST_ID, attempt: 3}),
+      'canceled',
+    );
+  });
+
+  it('exposes active requests with their timing context', async () => {
+    const sockets: FakeSocket[] = [];
+    const settled = vi.fn();
+    const deadline = Date.now() - 1;
+    const session = new RemoteSession({
+      pairingStore: new MemoryPairingStore(pairing()),
+      handleRequest: () => Promise.resolve(bytes(0, 0, 0, 1, 5)),
+      onChange() {},
+      onDisconnect() {},
+      onRequestSettled: settled,
+      createSocket: endpoint => {
+        const socket = new FakeSocket(endpoint);
+        sockets.push(socket);
+        return socket as unknown as WebSocket;
+      },
+    });
+    await session.connect(ENDPOINT, 'Browser');
+    const socket = sockets[0]!;
+    socket.open();
+    socket.receive({
+      type: 'authenticated',
+      server_id: SERVER_ID,
+      session_id: SESSION_ID,
+      vapid_public_key: VAPID_PUBLIC_KEY,
+    });
+    await settle();
+
+    const packet = signPacket();
+    socket.receive({
+      type: 'agent_request',
+      request_id: REQUEST_ID,
+      attempt: 4,
+      requested_at: 1_799_999_910_000,
+      deadline,
+      packet,
+    });
+    await settle();
+
+    const request = {
+      requestId: REQUEST_ID,
+      attempt: 4,
+      requestedAt: 1_799_999_910_000,
+      deadline,
+      packet,
+    };
+    expect(session.pendingRequests()).toEqual([request]);
+
+    socket.receive({type: 'cancel_request', request_id: REQUEST_ID, attempt: 4});
+    await settle();
+
+    expect(session.pendingRequests()).toEqual([]);
+    expect(settled).toHaveBeenCalledWith(request, 'expired');
   });
 
   it('reports request lifecycle transitions with request context', async () => {
@@ -246,7 +322,7 @@ describe('RemoteSession', () => {
     socket.receive({
       type: 'agent_request',
       request_id: REQUEST_ID,
-      attempt: 4,
+      attempt: 5,
       requested_at: 1_799_999_910_000,
       deadline: 1_800_000_000_000,
       packet,
@@ -255,7 +331,7 @@ describe('RemoteSession', () => {
 
     const request = {
       requestId: REQUEST_ID,
-      attempt: 4,
+      attempt: 5,
       requestedAt: 1_799_999_910_000,
       deadline: 1_800_000_000_000,
       packet,
@@ -263,7 +339,7 @@ describe('RemoteSession', () => {
     expect(pending).toHaveBeenCalledWith(request);
     expect(processing).not.toHaveBeenCalled();
 
-    socket.receive({type: 'cancel_request', request_id: REQUEST_ID, attempt: 4});
+    socket.receive({type: 'cancel_request', request_id: REQUEST_ID, attempt: 5});
     await settle();
 
     expect(closed).toHaveBeenCalledWith(expect.objectContaining(request));
@@ -394,17 +470,20 @@ async function connectSession({
   ready = false,
   handleRequest = () => Promise.resolve(bytes(0, 0, 0, 1, 5)),
   canProcessBeforeReady,
+  onRequestSettled,
 }: {
   store: PairingStore;
   ready?: boolean;
   handleRequest?: (packet: Bytes) => Promise<Bytes>;
   canProcessBeforeReady?: (request: {packet: Bytes}) => boolean;
+  onRequestSettled?: (request: RemoteRequest, outcome: RemoteRequestOutcome) => void;
 }): Promise<{session: RemoteSession; socket: FakeSocket}> {
   const sockets: FakeSocket[] = [];
   const session = new RemoteSession({
     pairingStore: store,
     handleRequest,
     canProcessBeforeReady,
+    onRequestSettled,
     onChange() {},
     onDisconnect() {},
     createSocket: endpoint => {
