@@ -2,7 +2,7 @@ use std::{borrow::Cow, fmt::Write};
 
 use axum::{
     body::Body,
-    extract::Path,
+    extract::{Path, State},
     http::{
         HeaderMap, HeaderValue, StatusCode,
         header::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, ETAG, IF_NONE_MATCH},
@@ -10,16 +10,38 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use rust_embed::{EmbeddedFile, RustEmbed};
+use sha2::{Digest, Sha256};
+
+use super::WebState;
 
 const IMMUTABLE_CACHE: &str = "public, max-age=31536000, immutable";
 const REVALIDATE_CACHE: &str = "no-cache";
+const SENTRY_DSN_PLACEHOLDER: &str = r#""__AGENT_WITNESS_SENTRY_DSN__""#;
 
 #[derive(RustEmbed)]
 #[folder = "../../packages/app/dist"]
 struct Assets;
 
-pub async fn index(headers: HeaderMap) -> Response {
-    serve("index.html", REVALIDATE_CACHE, &headers)
+pub async fn index(State(state): State<WebState>, headers: HeaderMap) -> Response {
+    let Some(file) = Assets::get("index.html") else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let source = str::from_utf8(file.data.as_ref()).expect("index.html must be UTF-8");
+    let sentry_dsn = serde_json::to_string(&state.sentry_frontend_dsn)
+        .expect("serializing an optional string cannot fail")
+        .replace('<', "\\u003c");
+    let data = source
+        .replacen(SENTRY_DSN_PLACEHOLDER, &sentry_dsn, 1)
+        .into_bytes();
+    let etag = etag_bytes(&data);
+
+    serve_data(
+        "index.html",
+        Cow::Owned(data),
+        REVALIDATE_CACHE,
+        &headers,
+        &etag,
+    )
 }
 
 pub async fn manifest(headers: HeaderMap) -> Response {
@@ -40,18 +62,23 @@ fn serve(path: &str, cache_control: &'static str, request_headers: &HeaderMap) -
     };
     let etag = etag(&file);
 
-    if matches_etag(request_headers, &etag) {
-        return response(
-            StatusCode::NOT_MODIFIED,
-            Body::empty(),
-            cache_control,
-            &etag,
-        );
+    serve_data(path, file.data, cache_control, request_headers, &etag)
+}
+
+fn serve_data(
+    path: &str,
+    data: Cow<'static, [u8]>,
+    cache_control: &'static str,
+    request_headers: &HeaderMap,
+    etag: &str,
+) -> Response {
+    if matches_etag(request_headers, etag) {
+        return response(StatusCode::NOT_MODIFIED, Body::empty(), cache_control, etag);
     }
 
     let content_type = mime_guess::from_path(path).first_or_octet_stream();
-    let content_length = file.data.len();
-    let mut response = response(StatusCode::OK, body(file.data), cache_control, &etag);
+    let content_length = data.len();
+    let mut response = response(StatusCode::OK, body(data), cache_control, etag);
     response.headers_mut().insert(
         CONTENT_TYPE,
         HeaderValue::from_str(content_type.as_ref()).expect("MIME type must be a valid header"),
@@ -90,6 +117,17 @@ fn body(data: Cow<'static, [u8]>) -> Body {
 
 fn etag(file: &EmbeddedFile) -> String {
     let hash = file.metadata.sha256_hash();
+    let mut value = String::with_capacity(hash.len() * 2 + 2);
+    value.push('"');
+    for byte in hash {
+        write!(value, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    value.push('"');
+    value
+}
+
+fn etag_bytes(data: &[u8]) -> String {
+    let hash = Sha256::digest(data);
     let mut value = String::with_capacity(hash.len() * 2 + 2);
     value.push('"');
     for byte in hash {

@@ -42,6 +42,20 @@ The resulting `target/release/agent-witness` binary contains the complete Vite
 application and does not need `packages/app/dist` at runtime. Production
 deployments should terminate TLS in front of its HTTP listener.
 
+## Sentry
+
+Configure separate Sentry projects for the daemon and browser application. The
+server embeds the public frontend DSN in the HTML response at runtime, so the
+frontend build contains no environment-specific configuration:
+
+```toml
+sentry_backend_dsn = "https://public@example.ingest.sentry.io/1"
+sentry_frontend_dsn = "https://public@example.ingest.sentry.io/2"
+```
+
+Both SDKs send errors, structured logs, and traces when their DSN is configured.
+Tracing uses a `1.0` sample rate.
+
 ## Pairing state
 
 Pairing remains process-local when `state_path` is omitted. Configure a state

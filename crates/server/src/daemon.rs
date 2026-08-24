@@ -68,6 +68,7 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             shutdown: shutdown.clone(),
         },
         config.max_agent_packet_size + 4 + MAX_MESSAGE_OVERHEAD,
+        config.sentry_frontend_dsn.clone(),
     );
     let web_shutdown = shutdown.clone();
     let mut web_task = tokio::spawn(async move {

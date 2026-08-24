@@ -9,3 +9,5 @@ request_timeout = "90s"
 max_agent_packet_size = 262144
 max_pending_requests = 32
 remote_capacity = 32
+# sentry_backend_dsn = "https://public@example.ingest.sentry.io/1"
+# sentry_frontend_dsn = "https://public@example.ingest.sentry.io/2"

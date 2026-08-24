@@ -43,6 +43,7 @@ async fn serves_the_embedded_application_with_cache_validation() {
             shutdown: CancellationToken::new(),
         },
         1024,
+        Some("https://public@example.com/1".into()),
     );
 
     let index = app
@@ -57,6 +58,8 @@ async fn serves_the_embedded_application_with_cache_validation() {
     let index = to_bytes(index.into_body(), usize::MAX).await.unwrap();
     let index = str::from_utf8(&index).unwrap();
     assert!(index.contains(r#"rel="manifest" href="/manifest.webmanifest""#));
+    assert!(index.contains(r#"{"sentryDsn": "https://public@example.com/1"}"#));
+    assert!(!index.contains("__AGENT_WITNESS_SENTRY_DSN__"));
     let asset_path = attribute(index, "src=\"");
 
     let manifest = app

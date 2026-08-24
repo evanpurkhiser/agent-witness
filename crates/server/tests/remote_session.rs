@@ -44,6 +44,7 @@ async fn websocket_adapts_a_remote_worker_to_the_broker() {
             shutdown: shutdown.clone(),
         },
         1024,
+        None,
     );
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();

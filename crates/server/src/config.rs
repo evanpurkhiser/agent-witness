@@ -54,6 +54,12 @@ pub struct Config {
 
     /// Maximum number of requests delivered to the remote worker at once.
     pub remote_capacity: usize,
+
+    /// Sentry DSN used by the server process.
+    pub sentry_backend_dsn: Option<String>,
+
+    /// Public Sentry DSN embedded into the frontend HTML.
+    pub sentry_frontend_dsn: Option<String>,
 }
 
 impl Default for Config {
@@ -70,6 +76,8 @@ impl Default for Config {
             max_agent_packet_size: 256 * 1024,
             max_pending_requests: 32,
             remote_capacity: 32,
+            sentry_backend_dsn: None,
+            sentry_frontend_dsn: None,
         }
     }
 }
@@ -157,8 +165,22 @@ impl Config {
             ));
         }
 
+        validate_dsn("sentry_backend_dsn", self.sentry_backend_dsn.as_deref())?;
+        validate_dsn("sentry_frontend_dsn", self.sentry_frontend_dsn.as_deref())?;
+
         Ok(())
     }
+}
+
+fn validate_dsn(name: &str, value: Option<&str>) -> Result<(), ConfigError> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+
+    value
+        .parse::<sentry::types::Dsn>()
+        .map(|_| ())
+        .map_err(|error| ConfigError::Invalid(format!("{name} is not a valid Sentry DSN: {error}")))
 }
 
 /// Failure to validate an extracted configuration.
@@ -284,6 +306,16 @@ mod tests {
     fn rejects_invalid_values() {
         let config = Config {
             max_pending_requests: 0,
+            ..Config::default()
+        };
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_sentry_dsns() {
+        let config = Config {
+            sentry_backend_dsn: Some("not-a-dsn".into()),
             ..Config::default()
         };
 

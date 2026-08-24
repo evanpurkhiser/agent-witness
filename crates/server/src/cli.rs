@@ -5,7 +5,8 @@ use std::{
 
 use anyhow::bail;
 use clap::{Args, Parser, Subcommand};
-use tracing_subscriber::EnvFilter;
+use sentry::integrations::tracing::{EventFilter, default_event_filter};
+use tracing_subscriber::{EnvFilter, prelude::*};
 
 use crate::{
     config::{Config, ConfigOverrides},
@@ -64,8 +65,6 @@ struct ClearPairingArgs {
 }
 
 pub async fn run() -> anyhow::Result<()> {
-    init_tracing()?;
-
     let cli = Cli::parse();
     match cli.command {
         Command::Serve(args) => serve(cli.config, cli.control_socket, args).await,
@@ -90,6 +89,8 @@ async fn serve(
     )?;
     config.validate()?;
 
+    let _sentry = init_tracing(config.sentry_backend_dsn.as_deref())?;
+
     daemon::run(config).await
 }
 
@@ -98,6 +99,8 @@ async fn clear_pairing(
     control_socket: Option<PathBuf>,
     args: ClearPairingArgs,
 ) -> anyhow::Result<()> {
+    let _sentry = init_tracing(None)?;
+
     if !args.yes {
         confirm_clear()?;
     }
@@ -136,14 +139,32 @@ fn confirm_clear() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn init_tracing() -> anyhow::Result<()> {
+fn init_tracing(sentry_dsn: Option<&str>) -> anyhow::Result<Option<sentry::ClientInitGuard>> {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("agent_witness_server=info"));
 
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
+    let sentry = sentry_dsn.map(|dsn| {
+        let options = sentry::ClientOptions::new()
+            .dsn(dsn)
+            .enable_logs(true)
+            .maybe_release(sentry::release_name!())
+            .traces_sample_rate(1.0);
+
+        sentry::init(options)
+    });
+    let sentry_layer = sentry.as_ref().map(|_| {
+        sentry::integrations::tracing::layer()
+            .event_filter(|metadata| default_event_filter(metadata) | EventFilter::Log)
+    });
+
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer())
+        .with(sentry_layer)
         .try_init()
-        .map_err(|error| anyhow::anyhow!("could not initialize logging: {error}"))
+        .map_err(|error| anyhow::anyhow!("could not initialize logging: {error}"))?;
+
+    Ok(sentry)
 }
 
 #[cfg(test)]
