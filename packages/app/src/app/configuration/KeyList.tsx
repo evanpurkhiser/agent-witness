@@ -1,5 +1,6 @@
 import {type FormEvent, useState} from 'react';
 
+import {parseOpenSSHPrivateKey} from 'app/ssh/key';
 import type {KeyType} from 'app/vault/types';
 import type {KeyView} from 'app/worker/api';
 
@@ -32,7 +33,7 @@ export function KeyList() {
         return;
       }
 
-      setKeyComment('');
+      setKeyComment(parseOpenSSHPrivateKey(pem).comment);
       setPendingPem(pem);
     } catch (cause) {
       setClipboardError(
