@@ -101,7 +101,6 @@ describe('managing keys', () => {
     expect(unlocked.vault.keys).toHaveLength(1);
     const [key] = unlocked.vault.keys;
     expect(key.type).toBe('ssh-ed25519');
-    expect(key.name).toBe('test@agent-witness');
     expect(key.comment).toBe('test@agent-witness');
     expect(key.fingerprint).toBe(ED25519_FINGERPRINT);
   });
@@ -113,12 +112,12 @@ describe('managing keys', () => {
     expect(await store.getKey(unlocked.vault.keys[0].id)).not.toBeNull();
   });
 
-  it('honors an explicit key name', async () => {
+  it('honors an explicit key comment', async () => {
     const unlocked = await (
       await createUnlocked(await freshStore())
     ).addKey(keyFixture('ed25519'), 'work laptop');
 
-    expect(unlocked.vault.keys[0].name).toBe('work laptop');
+    expect(unlocked.vault.keys[0].comment).toBe('work laptop');
   });
 
   it('rejects a duplicate key', async () => {

@@ -23,7 +23,7 @@ async function unlockedWithKey(): Promise<UnlockedVault> {
     salt: random(32),
     label: 'iPhone',
   });
-  return unlocked.addKey(keyFixture('ed25519'));
+  return unlocked.addKey(keyFixture('ed25519'), 'Test key');
 }
 
 describe('vault agent backend', () => {
@@ -43,7 +43,7 @@ describe('vault agent backend', () => {
     const identities = await backend.listIdentities();
 
     expect(identities).toHaveLength(1);
-    expect(identities[0].comment).toBe('test@agent-witness');
+    expect(identities[0].comment).toBe('Test key');
     expect(identities[0].keyBlob).toEqual(vault.vault.keys[0].publicKey);
     expect(backend.sign).toBeUndefined();
   });

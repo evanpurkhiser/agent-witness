@@ -118,7 +118,7 @@ export interface UnlockedVault extends LoadedVault<UnlockedVault> {
    * Parse, encrypt, and store a passphrase-free SSH private key. Rejects with
    * `DuplicateKey` if the key is already present.
    */
-  addKey(pem: string, name?: string): Promise<UnlockedVault>;
+  addKey(pem: string, comment?: string): Promise<UnlockedVault>;
   /**
    * An ssh-agent backend that can sign with the resident master key.
    */
@@ -205,7 +205,7 @@ async function storeAddKey(
   vault: Vault,
   masterKey: CryptoKey,
   pem: string,
-  name?: string,
+  comment?: string,
 ): Promise<Vault> {
   const parsed = parseOpenSSHPrivateKey(pem);
   const publicKey = parsed.publicBlob.slice();
@@ -221,11 +221,10 @@ async function storeAddKey(
 
   const meta: PrivateKeyMeta = {
     id,
-    name: name ?? parsed.comment,
+    comment: comment ?? parsed.comment,
     type: parsed.type,
     publicKey,
     fingerprint,
-    comment: parsed.comment,
     addedAt: Date.now(),
   };
 
@@ -303,8 +302,8 @@ function unlockedVault(
   return {
     status: 'unlocked',
     vault,
-    async addKey(pem, name) {
-      const updated = await storeAddKey(store, vault, masterKey, pem, name);
+    async addKey(pem, comment) {
+      const updated = await storeAddKey(store, vault, masterKey, pem, comment);
       return unlockedVault(store, updated, masterKey);
     },
     async removeKey(keyId) {

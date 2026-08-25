@@ -23,10 +23,9 @@ export interface PasskeyView {
  */
 export interface KeyView {
   id: string;
-  name: string;
+  comment: string;
   type: KeyType;
   fingerprint: string;
-  comment: string;
   addedAt: number;
 }
 
@@ -56,7 +55,7 @@ export interface AuthorizationRequestView {
   attempt: number;
   requestedAt: number;
   deadline: number;
-  key: Pick<KeyView, 'id' | 'name'>;
+  key: Pick<KeyView, 'id' | 'comment'>;
 }
 
 /**
@@ -128,7 +127,7 @@ export interface WorkerApi {
   /**
    * Add a passphrase-free SSH private key to the unlocked vault.
    */
-  addKey(pem: string, name?: string): Promise<WorkerSnapshot>;
+  addKey(pem: string, comment?: string): Promise<WorkerSnapshot>;
   /**
    * Remove a key by id.
    */
@@ -154,10 +153,9 @@ export function toView(vault: Vault): VaultView {
     })),
     keys: vault.keys.map(key => ({
       id: key.id,
-      name: key.name,
+      comment: key.comment,
       type: key.type,
       fingerprint: key.fingerprint,
-      comment: key.comment,
       addedAt: key.addedAt,
     })),
   };

@@ -139,7 +139,7 @@ class WorkerSession implements WorkerApi {
           attempt: request.attempt,
           requestedAt: request.requestedAt,
           deadline: request.deadline,
-          key: {id: key.id, name: key.name},
+          key: {id: key.id, comment: key.comment},
         },
       ];
     });
@@ -249,10 +249,10 @@ class WorkerSession implements WorkerApi {
     return this.#snapshot();
   }
 
-  async addKey(pem: string, name?: string): Promise<WorkerSnapshot> {
+  async addKey(pem: string, comment?: string): Promise<WorkerSnapshot> {
     const state = await this.#current();
     assertVaultStatus(state, 'unlocked');
-    this.#state = await state.addKey(pem, name);
+    this.#state = await state.addKey(pem, comment);
     this.#syncIdentities(this.#state);
     return this.#publish();
   }

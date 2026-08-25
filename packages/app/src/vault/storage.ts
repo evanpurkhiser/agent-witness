@@ -8,10 +8,10 @@ import {type DBSchema, openDB} from 'idb';
 
 import type {PairingRecord, PairingStore} from 'app/remote/session';
 
-import type {EncryptedKey, Vault} from './types';
+import type {EncryptedKey, PrivateKeyMeta, Vault} from './types';
 
 const DB_NAME = 'agent-witness';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 // There is only ever one vault; it lives under this fixed key.
 const VAULT_KEY = 'vault';
@@ -56,7 +56,7 @@ export interface VaultStore extends PairingStore {
  */
 export async function openVaultStore(name: string = DB_NAME): Promise<VaultStore> {
   const db = await openDB<VaultDBSchema>(name, DB_VERSION, {
-    upgrade(database, oldVersion) {
+    upgrade(database, oldVersion, _newVersion, transaction) {
       if (oldVersion < 1) {
         database.createObjectStore('vault');
         database.createObjectStore('keys', {keyPath: 'keyId'});
@@ -67,6 +67,17 @@ export async function openVaultStore(name: string = DB_NAME): Promise<VaultStore
       const objectStoreNames = database.objectStoreNames as DOMStringList;
       if (oldVersion < 4 && objectStoreNames.contains('events')) {
         (database as unknown as IDBDatabase).deleteObjectStore('events');
+      }
+      if (oldVersion > 0 && oldVersion < 5) {
+        const vaults = transaction.objectStore('vault');
+        void vaults.get(VAULT_KEY).then(vault => {
+          if (!vault) {
+            return;
+          }
+
+          const keys = vault.keys.map(migrateKeyName);
+          return vaults.put({...vault, keys}, VAULT_KEY);
+        });
       }
     },
   });
@@ -113,4 +124,13 @@ export async function openVaultStore(name: string = DB_NAME): Promise<VaultStore
       ]);
     },
   };
+}
+
+function migrateKeyName(key: PrivateKeyMeta & {name?: string}): PrivateKeyMeta {
+  if (!('name' in key)) {
+    return key;
+  }
+
+  const {name, ...metadata} = key;
+  return {...metadata, comment: name || key.comment};
 }

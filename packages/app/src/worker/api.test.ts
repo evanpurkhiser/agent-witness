@@ -31,11 +31,10 @@ function sampleVault(): Vault {
     keys: [
       {
         id: 'key-1',
-        name: 'my key',
+        comment: 'my key',
         type: 'ssh-ed25519',
         publicKey: bytes(10, 11, 12),
         fingerprint: 'SHA256:abc',
-        comment: 'test@host',
         addedAt: 2000,
       },
     ],
@@ -56,10 +55,9 @@ describe('toView', () => {
 
     expect(view.keys[0]).toEqual({
       id: 'key-1',
-      name: 'my key',
+      comment: 'my key',
       type: 'ssh-ed25519',
       fingerprint: 'SHA256:abc',
-      comment: 'test@host',
       addedAt: 2000,
     });
     expect(view.keys[0]).not.toHaveProperty('publicKey');

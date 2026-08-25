@@ -196,7 +196,7 @@ function InstalledAppContent() {
                 <ul>
                   {vault.vault.keys.map(key => (
                     <li key={key.id}>
-                      <strong>{key.name}</strong>
+                      <strong>{key.comment}</strong>
                       <dl>
                         <dt>Type</dt>
                         <dd>{key.type}</dd>

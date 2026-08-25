@@ -50,9 +50,9 @@ export interface PrivateKeyMeta {
    */
   id: string;
   /**
-   * User-facing label, defaulting to the key's SSH comment.
+   * User-facing label advertised as the SSH-agent identity comment.
    */
-  name: string;
+  comment: string;
   /**
    * The key's SSH algorithm.
    */
@@ -65,10 +65,6 @@ export interface PrivateKeyMeta {
    * OpenSSH fingerprint, e.g. `SHA256:…`.
    */
   fingerprint: string;
-  /**
-   * The key's original SSH comment.
-   */
-  comment: string;
   /**
    * Unix epoch millis when the key was added.
    */

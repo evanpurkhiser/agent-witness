@@ -16,7 +16,7 @@ export function KeyList() {
   const [readingClipboard, setReadingClipboard] = useState(false);
   const [clipboardError, setClipboardError] = useState<string | null>(null);
   const [pendingPem, setPendingPem] = useState<string | null>(null);
-  const [keyName, setKeyName] = useState('');
+  const [keyComment, setKeyComment] = useState('');
 
   const vault = snapshot?.vault;
   const keys = vault && vault.status !== 'no-vault' ? vault.vault.keys : [];
@@ -32,7 +32,7 @@ export function KeyList() {
         return;
       }
 
-      setKeyName('');
+      setKeyComment('');
       setPendingPem(pem);
     } catch (cause) {
       setClipboardError(
@@ -47,9 +47,9 @@ export function KeyList() {
     event.preventDefault();
     setClipboardError(null);
 
-    const name = keyName.trim();
-    if (!pendingPem || name === '') {
-      setClipboardError('Enter a name for this key.');
+    const comment = keyComment.trim();
+    if (!pendingPem || comment === '') {
+      setClipboardError('Enter a comment for this key.');
       return;
     }
 
@@ -63,9 +63,9 @@ export function KeyList() {
         return;
       }
 
-      if (await addKey(pendingPem, name)) {
+      if (await addKey(pendingPem, comment)) {
         setPendingPem(null);
-        setKeyName('');
+        setKeyComment('');
       }
     } catch (cause) {
       setClipboardError(
@@ -75,7 +75,7 @@ export function KeyList() {
   }
 
   function remove(key: KeyView): void {
-    if (!window.confirm(`Remove “${key.name || key.fingerprint}”?`)) {
+    if (!window.confirm(`Remove “${key.comment || key.fingerprint}”?`)) {
       return;
     }
 
@@ -109,7 +109,7 @@ export function KeyList() {
                   <header className="flex items-start justify-between gap-3">
                     <div className="flex min-w-0 items-baseline gap-2">
                       <h3 className="text-foreground-strong truncate text-xs font-semibold">
-                        {key.name || key.type}
+                        {key.comment || key.type}
                       </h3>
                       <span className="text-foreground-faint shrink-0 text-[9px] font-semibold tracking-[0.1em] uppercase">
                         {KEY_FORMAT[key.type]}
@@ -117,7 +117,7 @@ export function KeyList() {
                     </div>
                     <button
                       type="button"
-                      aria-label={`Remove ${key.name || key.fingerprint}`}
+                      aria-label={`Remove ${key.comment || key.fingerprint}`}
                       disabled={working}
                       className="text-foreground-faint hover:bg-surface-hover hover:text-foreground grid size-7 shrink-0 place-items-center rounded-md transition-colors disabled:cursor-default disabled:opacity-40"
                       onClick={() => remove(key)}
@@ -157,14 +157,14 @@ export function KeyList() {
         {pendingPem ? (
           <form className="grid gap-3" onSubmit={event => void saveKey(event)}>
             <label className="text-foreground-muted grid gap-1.5 text-xs font-semibold">
-              Key name
+              Key comment
               <input
                 autoFocus
                 required
                 type="text"
-                value={keyName}
+                value={keyComment}
                 className="border-border-strong bg-surface text-foreground focus:border-border-primary h-12 rounded-lg border px-3 text-sm font-normal outline-none"
-                onChange={event => setKeyName(event.target.value)}
+                onChange={event => setKeyComment(event.target.value)}
               />
             </label>
             <div className="grid grid-cols-2 gap-3">
@@ -174,7 +174,7 @@ export function KeyList() {
                 className="border-border-strong bg-surface text-foreground-muted h-12 rounded-lg border px-4 text-xs font-semibold tracking-[0.08em] uppercase disabled:opacity-40"
                 onClick={() => {
                   setPendingPem(null);
-                  setKeyName('');
+                  setKeyComment('');
                   setClipboardError(null);
                 }}
               >

@@ -42,7 +42,7 @@ export function AuthorizationRequestCard({request, now}: AuthorizationRequestCar
           {deadlineSeconds}s
         </time>
       )}
-      <p className="text-foreground-subtle truncate text-xs" title={request.key.name}>
+      <p className="text-foreground-subtle truncate text-xs" title={request.key.comment}>
         <RequestDescription request={request} />
       </p>
       <p
@@ -60,7 +60,7 @@ export function AuthorizationRequestCard({request, now}: AuthorizationRequestCar
 
 function RequestDescription({request}: {request: RetainedAuthorizationRequest}) {
   const key = (
-    <code className="text-foreground font-mono font-semibold">{request.key.name}</code>
+    <code className="text-foreground font-mono font-semibold">{request.key.comment}</code>
   );
 
   switch (request.status) {
