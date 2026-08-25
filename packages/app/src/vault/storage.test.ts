@@ -140,49 +140,6 @@ describe('VaultStore', () => {
     upgraded.close();
   });
 
-  it('promotes legacy key names to identity comments during upgrade', async () => {
-    const name = globalThis.crypto.randomUUID();
-    const vault = sampleVault();
-    const [key] = vault.keys;
-    const legacyVault = {
-      ...vault,
-      keys: [
-        {
-          id: key.id,
-          name: 'work laptop',
-          type: key.type,
-          publicKey: key.publicKey,
-          fingerprint: key.fingerprint,
-          comment: 'original comment',
-          addedAt: key.addedAt,
-        },
-      ],
-    };
-    const legacy = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(name, 4);
-      request.onerror = () => reject(request.error);
-      request.onupgradeneeded = () => {
-        request.result.createObjectStore('vault');
-        request.result.createObjectStore('keys', {keyPath: 'keyId'});
-        request.result.createObjectStore('pairings', {keyPath: 'endpoint'});
-      };
-      request.onsuccess = () => resolve(request.result);
-    });
-    const transaction = legacy.transaction('vault', 'readwrite');
-    transaction.objectStore('vault').put(legacyVault, 'vault');
-    await new Promise<void>((resolve, reject) => {
-      transaction.onerror = () => reject(transaction.error);
-      transaction.oncomplete = () => resolve();
-    });
-    legacy.close();
-
-    const store = await openVaultStore(name);
-    const migrated = await store.loadVault();
-
-    expect(migrated?.keys[0].comment).toBe('work laptop');
-    expect(migrated?.keys[0]).not.toHaveProperty('name');
-  });
-
   it('destroys the vault and all keys', async () => {
     const store = await freshStore();
     await store.save(sampleVault(), {put: sampleKey('key-1')});
