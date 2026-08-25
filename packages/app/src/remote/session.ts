@@ -54,6 +54,12 @@ export interface PushSubscriptionRegistration {
   auth: string;
 }
 
+/** Public SSH identity metadata synchronized to the paired server. */
+interface PublicIdentityRegistration {
+  keyBlob: Bytes;
+  comment: string;
+}
+
 export interface RemoteRequest {
   requestId: string;
   attempt: number;
@@ -122,6 +128,8 @@ export class RemoteSession {
   #pairing: PairingRecord | null = null;
 
   #ready = false;
+
+  #identities: PublicIdentityRegistration[] = [];
 
   #active = true;
 
@@ -363,6 +371,21 @@ export class RemoteSession {
     this.#send(socket, {type: 'set_push_subscription', ...subscription});
   }
 
+  /** Replace the public identities advertised by the paired server. */
+  setIdentities(identities: PublicIdentityRegistration[]): void {
+    this.#identities = identities.map(identity => ({
+      keyBlob: identity.keyBlob.slice(),
+      comment: identity.comment,
+    }));
+
+    const socket = this.#socket;
+    if (!socket || this.#snapshot.status !== 'connected') {
+      return;
+    }
+
+    this.#sendIdentities(socket);
+  }
+
   /**
    * Decode and route one message after all earlier messages have settled.
    */
@@ -482,8 +505,13 @@ export class RemoteSession {
       vapidPublicKey,
       error: null,
     });
+    this.#sendIdentities(socket);
     this.#send(socket, {type: this.#ready ? 'agent_ready' : 'agent_locked'});
     this.#drain(socket);
+  }
+
+  #sendIdentities(socket: WebSocket): void {
+    this.#send(socket, {type: 'set_identities', identities: this.#identities});
   }
 
   /**

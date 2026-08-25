@@ -161,6 +161,19 @@ class WorkerSession implements WorkerApi {
     return handleAgentRequest(request.payload, state.agentBackend());
   }
 
+  #syncIdentities(state: VaultState): void {
+    if (state.status === 'no-vault') {
+      this.#remote.setIdentities([]);
+      return;
+    }
+
+    const identities = state.vault.keys.map(key => ({
+      keyBlob: key.publicKey,
+      comment: key.comment,
+    }));
+    this.#remote.setIdentities(identities);
+  }
+
   #lock(): void {
     if (this.#state?.status !== 'unlocked') {
       return;
@@ -186,6 +199,7 @@ class WorkerSession implements WorkerApi {
 
   async connect(endpoint: string, label: string): Promise<WorkerSnapshot> {
     const state = await this.#current();
+    this.#syncIdentities(state);
     this.#remote.setReady(state.status === 'unlocked');
     await this.#remote.connect(endpoint, label);
     return this.#snapshot();
@@ -216,6 +230,7 @@ class WorkerSession implements WorkerApi {
     const state = await this.#current();
     assertVaultStatus(state, 'no-vault');
     this.#state = await state.createVault(params);
+    this.#syncIdentities(this.#state);
     this.#remote.setReady(true);
     return this.#publish();
   }
@@ -238,6 +253,7 @@ class WorkerSession implements WorkerApi {
     const state = await this.#current();
     assertVaultStatus(state, 'unlocked');
     this.#state = await state.addKey(pem, name);
+    this.#syncIdentities(this.#state);
     return this.#publish();
   }
 
@@ -245,6 +261,7 @@ class WorkerSession implements WorkerApi {
     const state = await this.#current();
     assertVaultStatus(state, 'locked', 'unlocked');
     this.#state = await state.removeKey(keyId);
+    this.#syncIdentities(this.#state);
     return this.#publish();
   }
 
@@ -252,6 +269,7 @@ class WorkerSession implements WorkerApi {
     const state = await this.#current();
     assertVaultStatus(state, 'locked', 'unlocked');
     this.#state = await state.destroy();
+    this.#syncIdentities(this.#state);
     this.#remote.setReady(false);
     return this.#publish();
   }

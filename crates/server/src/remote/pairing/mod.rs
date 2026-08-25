@@ -5,6 +5,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use anyhow::Context;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -13,7 +14,10 @@ use thiserror::Error;
 use tokio::sync::{Mutex, watch};
 use uuid::Uuid;
 
-use crate::push::PushSubscription;
+use crate::{
+    packet::{AgentIdentity, validate_identities},
+    push::PushSubscription,
+};
 
 const CREDENTIAL_LENGTH: usize = 32;
 
@@ -51,6 +55,8 @@ pub struct PairedClient {
     pub(crate) last_seen_at: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) push_subscription: Option<PushSubscription>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) identities: Option<Vec<AgentIdentity>>,
 }
 
 /// Asynchronous operation performed by a pairing store.
@@ -71,6 +77,7 @@ pub struct PairingService {
     store: Arc<dyn PairingStore>,
     state: Arc<Mutex<PairingState>>,
     revocations: watch::Sender<u64>,
+    identities: watch::Sender<Option<Vec<AgentIdentity>>>,
 }
 
 impl PairingService {
@@ -85,12 +92,21 @@ impl PairingService {
             }
         };
 
+        let identities = state
+            .client
+            .as_ref()
+            .and_then(|client| client.identities.clone());
+        if let Some(identities) = identities.as_deref() {
+            validate_identities(identities).context("stored client identities are invalid")?;
+        }
         let (revocations, _) = watch::channel(0);
+        let (identities, _) = watch::channel(identities);
 
         Ok(Self {
             store,
             state: Arc::new(Mutex::new(state)),
             revocations,
+            identities,
         })
     }
 
@@ -107,6 +123,7 @@ impl PairingService {
         };
         self.store.save(&next).await?;
         *state = next;
+        self.identities.send_replace(None);
         self.revocations.send_modify(|generation| *generation += 1);
 
         Ok(true)
@@ -120,6 +137,11 @@ impl PairingService {
             .client
             .as_ref()
             .and_then(|client| client.push_subscription.clone())
+    }
+
+    /// Subscribe to the public identities registered by the paired client.
+    pub fn subscribe_identities(&self) -> watch::Receiver<Option<Vec<AgentIdentity>>> {
+        self.identities.subscribe()
     }
 }
 
@@ -144,6 +166,7 @@ impl PairingAuthority for PairingService {
                     created_at: now(),
                     last_seen_at: None,
                     push_subscription: None,
+                    identities: None,
                 }),
             };
             self.store
@@ -221,6 +244,38 @@ impl PairingAuthority for PairingService {
         })
     }
 
+    fn set_identities<'a>(
+        &'a self,
+        client_id: Uuid,
+        identities: Vec<AgentIdentity>,
+    ) -> PairingUpdateFuture<'a> {
+        Box::pin(async move {
+            validate_identities(&identities).map_err(|_| AuthorizationError::InvalidIdentities)?;
+            let identity_update = identities.clone();
+            let mut state = self.state.lock().await;
+            let Some(client) = state.client.as_ref() else {
+                return Err(AuthorizationError::NotPaired);
+            };
+            if client.client_id != client_id {
+                return Err(AuthorizationError::Rejected);
+            }
+
+            let mut next = state.clone();
+            next.client
+                .as_mut()
+                .expect("paired client disappeared")
+                .identities = Some(identities);
+            self.store
+                .save(&next)
+                .await
+                .map_err(AuthorizationError::Storage)?;
+            *state = next;
+            self.identities.send_replace(Some(identity_update));
+
+            Ok(())
+        })
+    }
+
     fn subscribe_revocations(&self) -> watch::Receiver<u64> {
         self.revocations.subscribe()
     }
@@ -284,6 +339,10 @@ pub enum AuthorizationError {
     #[error("could not generate a client credential")]
     CredentialGeneration,
 
+    /// The supplied public identities could not form a valid SSH-agent response.
+    #[error("the client identities are invalid")]
+    InvalidIdentities,
+
     /// The pairing state could not be saved.
     #[error("could not save pairing state")]
     Storage(#[source] anyhow::Error),
@@ -299,6 +358,12 @@ pub trait PairingAuthority: Send + Sync {
         &'a self,
         client_id: Uuid,
         subscription: PushSubscription,
+    ) -> PairingUpdateFuture<'a>;
+
+    fn set_identities<'a>(
+        &'a self,
+        client_id: Uuid,
+        identities: Vec<AgentIdentity>,
     ) -> PairingUpdateFuture<'a>;
 
     fn subscribe_revocations(&self) -> watch::Receiver<u64>;

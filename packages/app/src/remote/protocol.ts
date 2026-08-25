@@ -13,6 +13,9 @@ export const protocolVersion = 1;
 const MAX_LABEL_LENGTH = 128;
 const MAX_CREDENTIAL_LENGTH = 128;
 const MAX_PUSH_ENDPOINT_LENGTH = 4096;
+const MAX_IDENTITIES = 64;
+const MAX_IDENTITY_KEY_BLOB_LENGTH = 16 * 1024;
+const MAX_IDENTITY_COMMENT_LENGTH = 1024;
 const MAX_U32 = 0xffffffff;
 
 const bytesSchema = z.custom<Bytes>(
@@ -47,6 +50,24 @@ const p256dhSchema = base64UrlSchema.length(
 );
 const authSecretSchema = base64UrlSchema.length(22, 'auth must encode a 16-byte secret');
 const expirationTimeSchema = z.number().int().nonnegative().safe().nullable();
+const identityKeyBlobSchema = bytesSchema.refine(
+  value => value.length > 0 && value.length <= MAX_IDENTITY_KEY_BLOB_LENGTH,
+  `key blob must contain between 1 and ${MAX_IDENTITY_KEY_BLOB_LENGTH} bytes`,
+);
+const identityCommentSchema = z
+  .string()
+  .refine(
+    value => new TextEncoder().encode(value).length <= MAX_IDENTITY_COMMENT_LENGTH,
+    `identity comment cannot exceed ${MAX_IDENTITY_COMMENT_LENGTH} UTF-8 bytes`,
+  );
+const wireIdentitySchema = z.object({
+  key_blob: identityKeyBlobSchema,
+  comment: identityCommentSchema,
+});
+const identitySchema = z.object({
+  keyBlob: identityKeyBlobSchema,
+  comment: identityCommentSchema,
+});
 
 const clientWireMessageSchema = z.discriminatedUnion('type', [
   z.object({
@@ -76,6 +97,10 @@ const clientWireMessageSchema = z.discriminatedUnion('type', [
     expiration_time: expirationTimeSchema,
     p256_dh: p256dhSchema,
     auth: authSecretSchema,
+  }),
+  z.object({
+    type: z.literal('set_identities'),
+    identities: z.array(wireIdentitySchema).max(MAX_IDENTITIES),
   }),
   z.object({
     type: z.literal('pong'),
@@ -110,6 +135,10 @@ const clientMessageSchema = z.discriminatedUnion('type', [
     expirationTime: expirationTimeSchema,
     p256Dh: p256dhSchema,
     auth: authSecretSchema,
+  }),
+  z.object({
+    type: z.literal('set_identities'),
+    identities: z.array(identitySchema).max(MAX_IDENTITIES),
   }),
   z.object({
     type: z.literal('pong'),

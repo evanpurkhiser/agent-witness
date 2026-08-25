@@ -494,7 +494,7 @@ async fn actor_times_out_without_a_remote() {
         wakes,
     );
 
-    let submit = submit_local(&requests, Bytes::from_static(b"request"));
+    let submit = submit_local(&requests, Bytes::from_static(&[0, 0, 0, 1, 11]));
     let (wake, result) = tokio::join!(
         timeout(Duration::from_secs(1), wake_requests.recv()),
         timeout(Duration::from_secs(1), submit),

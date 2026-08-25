@@ -95,6 +95,23 @@ describe('encodeClientMessage', () => {
     );
   });
 
+  it('encodes public identities using snake-case wire fields', () => {
+    expect(
+      encodeClientMessage({
+        type: 'set_identities',
+        identities: [{keyBlob: bytes(1, 2, 3), comment: 'phone key'}],
+      }),
+    ).toEqual(
+      encode({
+        version: 1,
+        message: {
+          type: 'set_identities',
+          identities: [{key_blob: bytes(1, 2, 3), comment: 'phone key'}],
+        },
+      }) as Bytes,
+    );
+  });
+
   it('rejects invalid push subscription fields', () => {
     expect(() =>
       encodeClientMessage({

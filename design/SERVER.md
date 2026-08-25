@@ -7,9 +7,8 @@ implement that design incrementally.
 
 ## Design principles
 
-- Every accepted local request enters the broker queue. A connected remote
-  worker makes the queued phase short; vault readiness does not create a
-  separate server path.
+- Identity-list requests are answered from the paired client's persisted public
+  metadata. Requests that need the remote worker enter the broker queue.
 - The broker is the only component that decides when to queue, dispatch,
   requeue, cancel, expire, or fail a request.
 - Socket and WebSocket handlers are adapters. They translate I/O into broker
@@ -34,6 +33,7 @@ crates/server/
     config.rs
     daemon.rs
     packet.rs
+    request_router.rs
     storage.rs
     pairing.rs
     stats.rs
@@ -76,16 +76,10 @@ crates/server/
 The intended dependency direction is:
 
 ```text
-main / CLI
-    ↓
-daemon orchestration
-    ↓
-I/O adapters ─────→ broker
-    │                 ↓
-    ├─ agent socket   request state
-    ├─ WebSocket      reconciliation
-    ├─ control IPC    effects
-    └─ push
+agent socket ─────────→ request router ─────────→ broker ←──── WebSocket
+                             ↑                     │
+paired-client identities ────┘                     └────→ push
+control IPC ──────────→ daemon / pairing
 ```
 
 The broker must not depend on an I/O adapter. Adapters may depend on the
@@ -186,6 +180,20 @@ Configuration and mutable state must remain separate.
 
 The broker is the center of the server and the sole owner of request state.
 
+### `request_router.rs`
+
+The request router is the boundary between local SSH-agent transport and remote
+request lifecycle management. It owns the current cached identities answer and
+routes each complete `PacketRequest`:
+
+- Answer an identity-list request locally when the paired client has supplied
+  an authoritative identity snapshot.
+- Forward the original request, response channel, and cancellation token to the
+  broker for every request requiring remote work.
+
+An unknown identity cache follows the remote path for compatibility. A known
+empty cache produces an empty identities answer locally.
+
 ### `broker/model.rs`
 
 The model contains the pure state machine:
@@ -237,22 +245,23 @@ The broker task wraps the model in a Tokio actor:
 - Return local responses through `oneshot` channels.
 - Publish sanitized snapshots to control IPC.
 
-The daemon owns the local request channel and passes its two ends directly to
-the socket adapter and broker:
+The daemon owns the socket-to-router and router-to-broker channels:
 
 ```rust
 let (local_requests, incoming_requests) = mpsc::channel(capacity);
-let (broker, task) = BrokerHandle::spawn(config, incoming_requests);
+let (broker_requests, incoming_broker_requests) = mpsc::channel(1);
+let (broker, task) = BrokerHandle::spawn(config, incoming_broker_requests);
+let router_task = request_router.serve(incoming_requests, broker_requests);
 let socket_task = socket.serve(local_requests, shutdown);
 ```
 
-The socket and broker both depend on the neutral `PacketRequest` channel
-protocol in `packet.rs`; neither depends on the other. Request-level failures
-such as timeout and queue exhaustion also live there rather than in the
-broker's control error. Each packet also carries a child cancellation token
-owned by its local connection. The broker watches that token, removes cancelled
-queued requests, and forwards cancellation for active remote attempts. The
-handle used by remote and control adapters remains narrow:
+The socket, router, and broker depend on the neutral `PacketRequest` channel
+protocol in `packet.rs`. Request-level failures such as timeout and queue
+exhaustion also live there rather than in the broker's control error. Each
+packet carries a child cancellation token owned by its local connection. The
+router preserves that token when forwarding; the broker watches it, removes
+cancelled queued requests, and forwards cancellation for active remote
+attempts. The handle used by remote and control adapters remains narrow:
 
 ```rust
 impl BrokerHandle {
@@ -264,8 +273,8 @@ impl BrokerHandle {
 }
 ```
 
-Every `PacketRequest` received by the broker enters the queue. There is no
-adapter-visible "dispatch immediately if connected" path.
+Every `PacketRequest` received by the broker enters the queue. Local identity
+responses never reach this layer.
 
 ### `broker/mod.rs`
 
@@ -353,6 +362,8 @@ Pairing owns the single paired-client lifecycle:
 - Authenticate reconnecting clients in constant time.
 - Update last-seen metadata.
 - Register or replace a push subscription.
+- Register or replace the public identities advertised through the SSH-agent
+  socket.
 - Clear pairing.
 
 Clearing pairing persists the unpaired state before invalidating the active

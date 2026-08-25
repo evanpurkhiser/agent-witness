@@ -154,9 +154,11 @@ mod tests {
     use super::{FilePairingStore, STATE_MODE};
     use crate::remote::pairing::{Authorization, AuthorizationError};
     use crate::{
+        packet::AgentIdentity,
         push::PushSubscription,
         remote::{PairingAuthority, PairingService, PairingStore},
     };
+    use bytes::Bytes;
 
     #[tokio::test]
     async fn persists_pairing_and_push_subscription_across_service_instances() {
@@ -189,6 +191,14 @@ mod tests {
             .set_push_subscription(client_id, subscription.clone())
             .await
             .unwrap();
+        let identities = vec![AgentIdentity {
+            key_blob: ed25519_blob(),
+            comment: "phone key".into(),
+        }];
+        first
+            .set_identities(client_id, identities.clone())
+            .await
+            .unwrap();
         assert_eq!(first.push_subscription().await, Some(subscription.clone()));
 
         let stored = FilePairingStore::new(path.clone())
@@ -196,7 +206,9 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(stored.client.unwrap().push_subscription, Some(subscription));
+        let stored_client = stored.client.unwrap();
+        assert_eq!(stored_client.push_subscription, Some(subscription));
+        assert_eq!(stored_client.identities, Some(identities));
 
         let reopened = PairingService::open(Arc::new(FilePairingStore::new(path)))
             .await
@@ -210,6 +222,7 @@ mod tests {
         };
 
         assert_eq!(reopened_server_id, server_id);
+        assert!(reopened.subscribe_identities().borrow().is_some());
     }
 
     #[tokio::test]
@@ -221,6 +234,22 @@ mod tests {
             .unwrap();
 
         assert_eq!(fs::metadata(path).unwrap().mode() & 0o777, STATE_MODE);
+    }
+
+    #[tokio::test]
+    async fn loads_a_paired_state_without_an_identity_cache() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("state.json");
+        let first = PairingService::open(Arc::new(FilePairingStore::new(path.clone())))
+            .await
+            .unwrap();
+        first.pair("iPhone".into()).await.unwrap();
+
+        let reopened = PairingService::open(Arc::new(FilePairingStore::new(path)))
+            .await
+            .unwrap();
+
+        assert!(reopened.subscribe_identities().borrow().is_none());
     }
 
     #[tokio::test]
@@ -278,5 +307,15 @@ mod tests {
             credential.len()
         );
         assert_eq!(credential.len(), 32);
+    }
+
+    fn ed25519_blob() -> Bytes {
+        let algorithm = b"ssh-ed25519";
+        let mut blob = Vec::new();
+        blob.extend_from_slice(&(algorithm.len() as u32).to_be_bytes());
+        blob.extend_from_slice(algorithm);
+        blob.extend_from_slice(&32_u32.to_be_bytes());
+        blob.extend_from_slice(&[7; 32]);
+        blob.into()
     }
 }

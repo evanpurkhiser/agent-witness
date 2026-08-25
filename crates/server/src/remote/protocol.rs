@@ -6,7 +6,10 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::broker::{RemoteCommand, RequestId, SessionId};
+use crate::{
+    broker::{RemoteCommand, RequestId, SessionId},
+    packet::{AgentIdentity, identities_answer},
+};
 
 const VERSION: u8 = 1;
 const MAX_LABEL_LENGTH: usize = 128;
@@ -14,6 +17,10 @@ const MAX_CREDENTIAL_LENGTH: usize = 128;
 const MAX_PUSH_ENDPOINT_LENGTH: usize = 4096;
 const P256DH_LENGTH: usize = 65;
 const AUTH_SECRET_LENGTH: usize = 16;
+const MAX_IDENTITIES: usize = 64;
+const MAX_IDENTITY_KEY_BLOB_LENGTH: usize = 16 * 1024;
+const MAX_IDENTITY_COMMENT_LENGTH: usize = 1024;
+const MAX_IDENTITIES_ANSWER_LENGTH: usize = 256 * 1024;
 
 /// Reserved headroom for non-packet fields, including push registration.
 pub const MAX_MESSAGE_OVERHEAD: usize = 8 * 1024;
@@ -44,6 +51,9 @@ pub enum ClientMessage {
         p256_dh: String,
         auth: String,
     },
+    SetIdentities {
+        identities: Vec<AgentIdentity>,
+    },
     Pong,
 }
 
@@ -69,9 +79,23 @@ impl ClientMessage {
             {
                 Err(ProtocolError::InvalidMessage)
             }
+            Self::SetIdentities { identities } if !valid_identities(identities) => {
+                Err(ProtocolError::InvalidMessage)
+            }
             _ => Ok(()),
         }
     }
+}
+
+fn valid_identities(identities: &[AgentIdentity]) -> bool {
+    identities.len() <= MAX_IDENTITIES
+        && identities.iter().all(|identity| {
+            !identity.key_blob.is_empty()
+                && identity.key_blob.len() <= MAX_IDENTITY_KEY_BLOB_LENGTH
+                && identity.comment.len() <= MAX_IDENTITY_COMMENT_LENGTH
+        })
+        && identities_answer(identities)
+            .is_ok_and(|answer| answer.len() <= MAX_IDENTITIES_ANSWER_LENGTH)
 }
 
 fn valid_push_endpoint(endpoint: &str) -> bool {
@@ -223,6 +247,8 @@ mod tests {
     use bytes::Bytes;
     use uuid::Uuid;
 
+    use crate::packet::AgentIdentity;
+
     use super::{ClientMessage, ProtocolError, decode_client, encode};
 
     const P256DH: &str =
@@ -296,6 +322,34 @@ mod tests {
     }
 
     #[test]
+    fn round_trips_valid_public_identities() {
+        let message = ClientMessage::SetIdentities {
+            identities: vec![AgentIdentity {
+                key_blob: ed25519_blob(),
+                comment: "phone key".into(),
+            }],
+        };
+        let frame = encode(&message).unwrap();
+
+        assert_eq!(decode_client(frame).unwrap(), message);
+    }
+
+    #[test]
+    fn rejects_invalid_public_identities() {
+        let message = ClientMessage::SetIdentities {
+            identities: vec![AgentIdentity {
+                key_blob: Bytes::from_static(b"not an SSH key"),
+                comment: String::new(),
+            }],
+        };
+
+        assert!(matches!(
+            decode_client(encode(message).unwrap()),
+            Err(ProtocolError::InvalidMessage)
+        ));
+    }
+
+    #[test]
     fn rejects_invalid_push_subscription_fields() {
         for message in [
             ClientMessage::SetPushSubscription {
@@ -336,5 +390,15 @@ mod tests {
             decode_client(Bytes::from(frame)),
             Err(ProtocolError::UnsupportedVersion(2))
         ));
+    }
+
+    fn ed25519_blob() -> Bytes {
+        let algorithm = b"ssh-ed25519";
+        let mut blob = Vec::new();
+        blob.extend_from_slice(&(algorithm.len() as u32).to_be_bytes());
+        blob.extend_from_slice(algorithm);
+        blob.extend_from_slice(&32_u32.to_be_bytes());
+        blob.extend_from_slice(&[7; 32]);
+        blob.into()
     }
 }

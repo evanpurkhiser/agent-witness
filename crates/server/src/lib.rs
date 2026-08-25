@@ -7,4 +7,5 @@ pub mod daemon;
 pub mod packet;
 pub mod push;
 pub mod remote;
+pub mod request_router;
 pub mod web;

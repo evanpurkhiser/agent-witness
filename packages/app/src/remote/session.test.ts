@@ -53,7 +53,10 @@ describe('RemoteSession', () => {
       sessionId: SESSION_ID,
       vapidPublicKey: VAPID_PUBLIC_KEY,
     });
-    expect(sentMessages(socket).at(-1)).toEqual({type: 'agent_locked'});
+    expect(sentMessages(socket).slice(-2)).toEqual([
+      {type: 'set_identities', identities: []},
+      {type: 'agent_locked'},
+    ]);
   });
 
   it('authenticates a stored pairing and reports ready', async () => {
@@ -81,6 +84,28 @@ describe('RemoteSession', () => {
       vapidPublicKey: VAPID_PUBLIC_KEY,
     });
     expect(sentMessages(socket).at(-1)).toEqual({type: 'agent_ready'});
+  });
+
+  it('synchronizes identities on authentication and after edits', async () => {
+    const store = new MemoryPairingStore(pairing());
+    const {session, socket} = await connectSession({store});
+    session.setIdentities([{keyBlob: bytes(1, 2, 3), comment: 'phone key'}]);
+
+    socket.receive({
+      type: 'authenticated',
+      server_id: SERVER_ID,
+      session_id: SESSION_ID,
+      vapid_public_key: VAPID_PUBLIC_KEY,
+    });
+    await settle();
+
+    expect(sentMessages(socket).at(-2)).toEqual({
+      type: 'set_identities',
+      identities: [{key_blob: bytes(1, 2, 3), comment: 'phone key'}],
+    });
+
+    session.setIdentities([]);
+    expect(sentMessages(socket).at(-1)).toEqual({type: 'set_identities', identities: []});
   });
 
   it('forgets a rejected server pairing without changing other state', async () => {

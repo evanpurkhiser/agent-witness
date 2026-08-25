@@ -263,6 +263,14 @@ async fn handle_client_message(
 
             return true;
         }
+        ClientMessage::SetIdentities { identities } => {
+            if let Err(error) = config.pairing.set_identities(client_id, identities).await {
+                warn!(%error, "could not persist client identities");
+                return false;
+            }
+
+            return true;
+        }
         ClientMessage::PairRequest { .. } | ClientMessage::Authenticate { .. } => {
             return false;
         }

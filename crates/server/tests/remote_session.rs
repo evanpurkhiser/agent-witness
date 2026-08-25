@@ -2,8 +2,9 @@ use std::{sync::Arc, time::Duration};
 
 use agent_witness_server::{
     broker::{BrokerConfig, BrokerHandle},
-    packet::{PacketRequest, RequestError},
+    packet::{AgentIdentity, PacketRequest, RequestError, identities_answer},
     remote::{MemoryPairingStore, PairingService, SessionConfig},
+    request_router::RequestRouter,
     web,
 };
 use bytes::Bytes;
@@ -19,22 +20,26 @@ use uuid::Uuid;
 
 #[tokio::test]
 async fn websocket_adapts_a_remote_worker_to_the_broker() {
+    let pairing = Arc::new(
+        PairingService::open(Arc::new(MemoryPairingStore::new()))
+            .await
+            .unwrap(),
+    );
+    let mut identity_updates = pairing.subscribe_identities();
     let (local_requests, incoming_requests) = mpsc::channel(8);
+    let (broker_requests, incoming_broker_requests) = mpsc::channel(1);
     let (wakes, _wake_requests) = mpsc::unbounded_channel();
     let (broker, broker_task) = BrokerHandle::spawn(
         BrokerConfig {
             request_timeout: Duration::from_secs(1),
             max_pending_requests: 8,
         },
-        incoming_requests,
+        incoming_broker_requests,
         wakes,
     );
+    let request_router = RequestRouter::new(pairing.subscribe_identities()).unwrap();
+    let router_task = tokio::spawn(request_router.serve(incoming_requests, broker_requests));
     let shutdown = CancellationToken::new();
-    let pairing = Arc::new(
-        PairingService::open(Arc::new(MemoryPairingStore::new()))
-            .await
-            .unwrap(),
-    );
     let app = web::router(
         SessionConfig {
             broker: broker.clone(),
@@ -87,8 +92,24 @@ async fn websocket_adapts_a_remote_worker_to_the_broker() {
     )
     .await;
 
+    let identities = vec![AgentIdentity {
+        key_blob: ed25519_blob(),
+        comment: "phone key".into(),
+    }];
+    send(
+        &mut remote,
+        ClientMessage::SetIdentities {
+            identities: identities.clone(),
+        },
+    )
+    .await;
+    tokio::time::timeout(Duration::from_secs(1), identity_updates.changed())
+        .await
+        .unwrap()
+        .unwrap();
+
     let request_packet = Bytes::from_static(b"\0\0\0\x01\x0b");
-    let response_packet = Bytes::from_static(b"\0\0\0\x01\x0c");
+    let response_packet = identities_answer(&identities).unwrap();
     let (response, response_receiver) = oneshot::channel();
     local_requests
         .send(PacketRequest {
@@ -99,6 +120,19 @@ async fn websocket_adapts_a_remote_worker_to_the_broker() {
         .await
         .unwrap();
 
+    assert_eq!(response_receiver.await.unwrap().unwrap(), response_packet);
+
+    let sign_request = Bytes::from_static(b"\0\0\0\x01\x0d");
+    let sign_response = Bytes::from_static(b"\0\0\0\x01\x0e");
+    let (response, response_receiver) = oneshot::channel();
+    local_requests
+        .send(PacketRequest {
+            packet: sign_request.clone(),
+            response,
+            cancellation: CancellationToken::new(),
+        })
+        .await
+        .unwrap();
     let ServerMessage::AgentRequest {
         request_id,
         attempt,
@@ -107,25 +141,25 @@ async fn websocket_adapts_a_remote_worker_to_the_broker() {
     else {
         panic!("expected an agent request")
     };
-    assert_eq!(packet, request_packet);
+    assert_eq!(packet, sign_request);
 
     send(
         &mut remote,
         ClientMessage::AgentResponse {
             request_id,
             attempt,
-            packet: response_packet.clone(),
+            packet: sign_response.clone(),
         },
     )
     .await;
 
-    assert_eq!(response_receiver.await.unwrap().unwrap(), response_packet);
+    assert_eq!(response_receiver.await.unwrap().unwrap(), sign_response);
 
     let cancellation = CancellationToken::new();
     let (response, response_receiver) = oneshot::channel();
     local_requests
         .send(PacketRequest {
-            packet: request_packet,
+            packet: sign_request.clone(),
             response,
             cancellation: cancellation.clone(),
         })
@@ -134,11 +168,12 @@ async fn websocket_adapts_a_remote_worker_to_the_broker() {
     let ServerMessage::AgentRequest {
         request_id,
         attempt,
-        ..
+        packet,
     } = receive(&mut remote).await
     else {
         panic!("expected an agent request")
     };
+    assert_eq!(packet, sign_request);
 
     cancellation.cancel();
 
@@ -164,6 +199,8 @@ async fn websocket_adapts_a_remote_worker_to_the_broker() {
     }
 
     shutdown.cancel();
+    drop(local_requests);
+    router_task.await.unwrap().unwrap();
     broker.shutdown().await;
     broker_task.await.unwrap();
     web_task.abort();
@@ -205,16 +242,19 @@ enum ClientMessage {
     PairRequest {
         label: String,
     },
-    AgentResponse {
-        request_id: String,
-        attempt: u32,
-        packet: Bytes,
-    },
     SetPushSubscription {
         endpoint: String,
         expiration_time: Option<u64>,
         p256_dh: String,
         auth: String,
+    },
+    SetIdentities {
+        identities: Vec<AgentIdentity>,
+    },
+    AgentResponse {
+        request_id: String,
+        attempt: u32,
+        packet: Bytes,
     },
 }
 
@@ -237,4 +277,14 @@ enum ServerMessage {
         request_id: String,
         attempt: u32,
     },
+}
+
+fn ed25519_blob() -> Bytes {
+    let algorithm = b"ssh-ed25519";
+    let mut blob = Vec::new();
+    blob.extend_from_slice(&(algorithm.len() as u32).to_be_bytes());
+    blob.extend_from_slice(algorithm);
+    blob.extend_from_slice(&32_u32.to_be_bytes());
+    blob.extend_from_slice(&[7; 32]);
+    blob.into()
 }

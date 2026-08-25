@@ -221,7 +221,9 @@ signing live — in TypeScript over WebCrypto, not in WASM.
 - Open and maintain the WebSocket
 - Register the browser's push subscription with the paired server
 - Receive remote agent messages
-- Answer identity-list requests from public metadata while the vault is locked
+- Synchronize identity-list public metadata after authentication and key edits
+- Retain identity-list handling as a compatibility fallback while the server's
+  cache is unknown
 - Buffer a bounded number of signing requests in memory while the vault is locked
 - Implement the ssh-agent protocol and produce signatures via WebCrypto
 - Return encoded responses over the WebSocket
@@ -497,10 +499,10 @@ enum RemoteAgentState {
 }
 ```
 
-A request does not take a different path based on this state. Every accepted
-local request enters the same broker queue first, even when a worker is already
-connected. Connection state and remote buffer capacity act as gates controlling
-when queued requests may be dispatched:
+Identity-list requests use the public identities cached with the paired client.
+Requests requiring remote processing enter the same broker queue even when a
+worker is already connected. Connection state and remote buffer capacity act as
+gates controlling when queued requests may be dispatched:
 
 ```
 request queued
@@ -519,6 +521,10 @@ This avoids separate disconnected, locked, and ready server flows.
 ```
 local process writes SSH-agent request
         ↓
+identity list with known cache?
+   yes → return locally encoded identities answer
+        ↓
+   no ──┘
 server assigns request ID
         ↓
 server admits request to queue
@@ -535,8 +541,7 @@ client connected?
 send request over WebSocket
         ↓
 vault unlocked?
-   no → identity list? → answer from public metadata
-        → otherwise buffer in worker memory
+   no → buffer signing request in worker memory
         → notify page and wait for unlock
    yes
         ↓
@@ -743,11 +748,17 @@ struct PairedClient {
     client_id: Uuid,
     label: String,
     push_subscription: Option<PushSubscription>,
+    identities: Option<Vec<AgentIdentity>>,
     credential_hash: Vec<u8>,
     created_at: DateTime<Utc>,
     last_seen_at: Option<DateTime<Utc>>,
 }
 ```
+
+`None` means the paired client has never synchronized its identities and keeps
+the remote compatibility path available. `Some([])` is an authoritative empty
+identity set. Public identity snapshots are replaced atomically after every key
+edit and survive server restarts.
 
 A web-push subscription normally includes:
 
