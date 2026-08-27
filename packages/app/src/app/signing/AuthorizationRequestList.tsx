@@ -191,12 +191,7 @@ function EmptyState({
     );
   }
 
-  return (
-    <EmptyStateCard
-      title="No pending requests"
-      description="New SSH authorization requests will appear here."
-    />
-  );
+  return <p className="text-foreground-faint text-[11px]">No pending requests</p>;
 }
 
 function EmptyStateCard({
