@@ -156,7 +156,7 @@ export function ConfigurationMenu() {
       <Dialog.Root open={sshKeysOpen} onOpenChange={setSshKeysOpen}>
         <Dialog.Portal>
           <Dialog.Backdrop className="bg-overlay fixed inset-0 z-40" />
-          <Dialog.Viewport className="fixed inset-0 z-50 grid items-end p-3">
+          <Dialog.Viewport className="fixed inset-0 z-50 grid place-items-center p-3">
             <Dialog.Popup
               ref={dialogRef}
               initialFocus={dialogRef}
@@ -165,7 +165,7 @@ export function ConfigurationMenu() {
                   initial={{opacity: 0, scale: 0.9}}
                   animate={{opacity: 1, scale: 1}}
                   transition={{duration: 0.2, ease: 'easeOut'}}
-                  style={{transformOrigin: 'bottom center'}}
+                  style={{transformOrigin: 'center'}}
                 />
               }
               className="border-border bg-canvas relative grid max-h-full w-full grid-rows-[minmax(0,1fr)] overflow-hidden rounded-xl border font-mono shadow-xl outline-none"
