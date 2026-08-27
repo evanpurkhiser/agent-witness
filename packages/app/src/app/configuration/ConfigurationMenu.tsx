@@ -207,10 +207,7 @@ export function ConfigurationMenu() {
               }
               className="border-border bg-surface w-full max-w-sm rounded-xl border p-5 font-mono shadow-xl outline-none"
             >
-              <div className="bg-expired-surface text-danger grid size-10 place-items-center rounded-full">
-                <TrashIcon />
-              </div>
-              <Dialog.Title className="text-foreground mt-4 text-base font-semibold">
+              <Dialog.Title className="text-foreground text-base font-semibold">
                 Delete vault?
               </Dialog.Title>
               <Dialog.Description className="text-foreground-muted mt-2 text-xs leading-5">

@@ -139,7 +139,6 @@ function EmptyState({
   if (connectionStatus === 'rejected') {
     return (
       <EmptyStateCard
-        icon={<BrokenLinkIcon />}
         title="Pairing rejected"
         description="This device is no longer authorized by the server. Pair it again to receive requests."
         action={
@@ -154,7 +153,6 @@ function EmptyState({
   if (connectionStatus === 'error') {
     return (
       <EmptyStateCard
-        icon={<BrokenLinkIcon />}
         title="Connection unavailable"
         description="Authorization requests will appear when the server connection is restored."
       />
@@ -164,7 +162,6 @@ function EmptyState({
   if (vault.status === 'no-vault') {
     return (
       <EmptyStateCard
-        icon={<VaultIcon />}
         title="Create your vault"
         description="Protect your SSH keys with a passkey before approving authorization requests."
         action={
@@ -179,7 +176,6 @@ function EmptyState({
   if (connectionStatus === 'connecting' || connectionStatus === 'reconnecting') {
     return (
       <EmptyStateCard
-        icon={<ConnectionIcon />}
         title={connectionStatus === 'connecting' ? 'Connecting' : 'Reconnecting'}
         description="Authorization requests will appear here once the server is connected."
       />
@@ -189,7 +185,6 @@ function EmptyState({
   if (vault.vault.keys.length === 0) {
     return (
       <EmptyStateCard
-        icon={<KeyIcon />}
         title="No private keys"
         description="Add your first SSH key from the Configure menu to begin approving requests."
       />
@@ -198,7 +193,6 @@ function EmptyState({
 
   return (
     <EmptyStateCard
-      icon={<RequestIcon />}
       title="No pending requests"
       description="New SSH authorization requests will appear here."
     />
@@ -206,22 +200,17 @@ function EmptyState({
 }
 
 function EmptyStateCard({
-  icon,
   title,
   description,
   action,
 }: {
-  icon: ReactNode;
   title: string;
   description: string;
   action?: ReactNode;
 }) {
   return (
     <div className="border-border bg-surface grid w-full max-w-sm justify-items-center rounded-xl border px-6 py-8 text-center shadow-xs">
-      <div className="border-border bg-canvas text-foreground-faint grid size-12 place-items-center rounded-full border">
-        {icon}
-      </div>
-      <h2 className="text-foreground-strong mt-4 text-sm font-semibold">{title}</h2>
+      <h2 className="text-foreground-strong text-sm font-semibold">{title}</h2>
       <p className="text-foreground-subtle mt-2 max-w-64 text-xs leading-5">
         {description}
       </p>
@@ -248,83 +237,6 @@ function EmptyStateButton({
     >
       {children}
     </button>
-  );
-}
-
-function VaultIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      className="size-6"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-    >
-      <rect x="3.5" y="5" width="17" height="15" rx="2" />
-      <path d="M7 5V3.5h10V5M8 10h8v5H8zM12 10v5" />
-    </svg>
-  );
-}
-
-function KeyIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      className="size-6"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-    >
-      <circle cx="8" cy="12" r="4" />
-      <path d="M12 12h8m-3 0v3m-3-3v2" />
-    </svg>
-  );
-}
-
-function RequestIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      className="size-6"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-    >
-      <path d="M7 3.5h10l3 3V20.5H4V3.5h3Zm1 5h8m-8 4h8m-8 4h5" />
-    </svg>
-  );
-}
-
-function ConnectionIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      className="size-6"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-    >
-      <path d="M5 9a10 10 0 0 1 14 0M8 12a6 6 0 0 1 8 0m-5 4a1.5 1.5 0 1 1 2 0" />
-    </svg>
-  );
-}
-
-function BrokenLinkIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      className="size-6"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-    >
-      <path d="m9 15-1 1a3.5 3.5 0 0 1-5-5l3-3a3.5 3.5 0 0 1 5 0M15 9l1-1a3.5 3.5 0 0 1 5 5l-3 3a3.5 3.5 0 0 1-5 0M8 4 6.5 2.5M16 20l1.5 1.5M4 8 2 7m18 9 2 1" />
-    </svg>
   );
 }
 
