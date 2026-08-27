@@ -15,9 +15,11 @@ interface SigningScreenProps {
   connection: ConnectionSnapshot;
   authorizationRequests: AuthorizationRequestView[];
   settledAuthorizations: SettledAuthorizationView[];
-  vault: Exclude<VaultSnapshot, {status: 'no-vault'}>;
+  vault: VaultSnapshot;
   working: boolean;
   error: string | null;
+  onCreateVault(): void;
+  onForgetPairing(): void;
   onAuthorize(): void;
 }
 
@@ -28,6 +30,8 @@ export function SigningScreen({
   vault,
   working,
   error,
+  onCreateVault,
+  onForgetPairing,
   onAuthorize,
 }: SigningScreenProps) {
   return (
@@ -36,6 +40,11 @@ export function SigningScreen({
         requests={authorizationRequests}
         settled={settledAuthorizations}
         error={error ?? connection.error}
+        connectionStatus={connection.status}
+        vault={vault}
+        working={working}
+        onCreateVault={onCreateVault}
+        onForgetPairing={onForgetPairing}
       />
 
       <footer className="grid gap-3">

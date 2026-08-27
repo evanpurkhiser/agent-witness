@@ -2,7 +2,7 @@ import type {VaultSnapshot} from 'app/worker/api';
 
 interface AuthorizeButtonProps {
   pendingRequests: number;
-  vaultStatus: Exclude<VaultSnapshot, {status: 'no-vault'}>['status'];
+  vaultStatus: VaultSnapshot['status'];
   working: boolean;
   onAuthorize(): void;
 }
