@@ -18,7 +18,15 @@ export function App() {
   }
 
   return (
-    <Suspense fallback={<p>Loading…</p>}>
+    <Suspense
+      fallback={
+        <main className="text-foreground grid min-h-full place-items-center px-5 font-mono">
+          <p role="status" className="text-foreground-muted text-sm">
+            Initializing…
+          </p>
+        </main>
+      }
+    >
       <InstalledApp />
     </Suspense>
   );
