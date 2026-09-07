@@ -10,6 +10,8 @@ use thiserror::Error;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 
+const OPENSSH_SESSION_BIND_EXTENSION: &[u8] = b"session-bind@openssh.com";
+
 /// Public key metadata needed to construct an SSH-agent identities answer.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -28,6 +30,21 @@ pub fn is_identity_request(packet: &[u8]) -> bool {
         Request::decode(&mut payload),
         Ok(Request::RequestIdentities)
     ) && payload.is_empty()
+}
+
+/// Return whether a complete packet is OpenSSH's session-binding extension.
+pub fn is_openssh_session_bind_request(packet: &[u8]) -> bool {
+    let Some(payload) = packet_payload(packet) else {
+        return false;
+    };
+    let Some((&27, extension)) = payload.split_first() else {
+        return false;
+    };
+    let Some(name) = ssh_string(extension) else {
+        return false;
+    };
+
+    name == OPENSSH_SESSION_BIND_EXTENSION
 }
 
 /// Encode a complete SSH-agent identities answer from public metadata.
@@ -87,6 +104,11 @@ fn packet_payload(packet: &[u8]) -> Option<&[u8]> {
     (payload.len() == length).then_some(payload)
 }
 
+fn ssh_string(value: &[u8]) -> Option<&[u8]> {
+    let length = u32::from_be_bytes(value.get(..4)?.try_into().ok()?) as usize;
+    value.get(4..4 + length)
+}
+
 /// Invalid public identity metadata supplied by the paired client.
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
 pub enum IdentityError {
@@ -131,7 +153,9 @@ pub enum RequestError {
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentIdentity, identities_answer, is_identity_request};
+    use super::{
+        AgentIdentity, identities_answer, is_identity_request, is_openssh_session_bind_request,
+    };
     use bytes::Bytes;
 
     #[test]
@@ -140,6 +164,20 @@ mod tests {
         assert!(!is_identity_request(&[0, 0, 0, 1, 13]));
         assert!(!is_identity_request(&[0, 0, 0, 2, 11]));
         assert!(!is_identity_request(&[0, 0, 0, 2, 11, 0]));
+    }
+
+    #[test]
+    fn recognizes_openssh_session_binding_extensions() {
+        let packet = extension_packet("session-bind@openssh.com", b"binding evidence");
+
+        assert!(is_openssh_session_bind_request(&packet));
+        assert!(!is_openssh_session_bind_request(&extension_packet(
+            "query@openssh.com",
+            b""
+        )));
+        assert!(!is_openssh_session_bind_request(
+            &packet[..packet.len() - 1]
+        ));
     }
 
     #[test]
@@ -174,5 +212,16 @@ mod tests {
         blob.extend_from_slice(&32_u32.to_be_bytes());
         blob.extend_from_slice(&[7; 32]);
         blob.into()
+    }
+
+    fn extension_packet(name: &str, contents: &[u8]) -> Vec<u8> {
+        let payload_length = 1 + 4 + name.len() + contents.len();
+        let mut packet = Vec::with_capacity(payload_length + 4);
+        packet.extend_from_slice(&(payload_length as u32).to_be_bytes());
+        packet.push(27);
+        packet.extend_from_slice(&(name.len() as u32).to_be_bytes());
+        packet.extend_from_slice(name.as_bytes());
+        packet.extend_from_slice(contents);
+        packet
     }
 }

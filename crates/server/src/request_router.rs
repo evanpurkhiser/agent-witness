@@ -5,8 +5,10 @@ use tokio::sync::{mpsc, watch};
 
 use crate::packet::{
     AgentIdentity, IdentityError, PacketRequest, RequestError, identities_answer,
-    is_identity_request,
+    is_identity_request, is_openssh_session_bind_request,
 };
+
+const AGENT_FAILURE_FRAME: &[u8] = &[0, 0, 0, 1, 5];
 
 /// Routes identity discovery to the local cache and forwards other requests.
 pub struct RequestRouter {
@@ -39,6 +41,13 @@ impl RequestRouter {
                 && let Some(answer) = self.identity_answer.as_ref()
             {
                 let _ = request.response.send(Ok(answer.clone()));
+                continue;
+            }
+
+            if is_openssh_session_bind_request(&request.packet) {
+                let _ = request
+                    .response
+                    .send(Ok(Bytes::from_static(AGENT_FAILURE_FRAME)));
                 continue;
             }
 
@@ -150,6 +159,41 @@ mod tests {
             .unwrap();
 
         assert_eq!(broker_requests.recv().await.unwrap().packet, packet);
+
+        drop(requests);
+        task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn rejects_openssh_session_binding_without_brokering_it() {
+        let (_identities, identity_updates) = watch::channel(None);
+        let (requests, incoming_requests) = mpsc::channel(1);
+        let (broker, mut broker_requests) = mpsc::channel(1);
+        let router = RequestRouter::new(identity_updates).unwrap();
+        let task = tokio::spawn(router.serve(incoming_requests, broker));
+        let (response, receiver) = oneshot::channel();
+        let name = b"session-bind@openssh.com";
+        let payload_length = 1 + 4 + name.len();
+        let mut packet = Vec::new();
+        packet.extend_from_slice(&(payload_length as u32).to_be_bytes());
+        packet.push(27);
+        packet.extend_from_slice(&(name.len() as u32).to_be_bytes());
+        packet.extend_from_slice(name);
+
+        requests
+            .send(PacketRequest {
+                packet: packet.into(),
+                response,
+                cancellation: CancellationToken::new(),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            receiver.await.unwrap(),
+            Ok(Bytes::from_static(&[0, 0, 0, 1, 5]))
+        );
+        assert!(broker_requests.try_recv().is_err());
 
         drop(requests);
         task.await.unwrap().unwrap();
