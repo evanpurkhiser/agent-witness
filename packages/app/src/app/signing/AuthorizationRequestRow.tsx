@@ -1,20 +1,18 @@
-import type {RetainedAuthorizationRequest} from './useRetainedAuthorizationRequests';
+import type {RetainedAuthorizationRequest} from './useRetainedAuthorizationRequestGroups';
 
-interface AuthorizationRequestCardProps {
+interface AuthorizationRequestRowProps {
   request: RetainedAuthorizationRequest;
   now: number;
 }
 
-export function AuthorizationRequestCard({request, now}: AuthorizationRequestCardProps) {
+export function AuthorizationRequestRow({request, now}: AuthorizationRequestRowProps) {
   const ageSeconds = Math.max(0, Math.floor((now - request.requestedAt) / 1000));
   const deadlineSeconds = Math.max(0, Math.ceil((request.deadline - now) / 1000));
   const terminal = request.status !== 'active';
   const style = requestStyle(request.status);
 
   return (
-    <div
-      className={`${style.palette} grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 rounded-lg border px-4 py-3.5 shadow-xs transition-colors duration-200`}
-    >
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 px-4 py-3 transition-colors duration-200">
       <div className="flex min-w-0 items-baseline gap-2">
         <time
           dateTime={new Date(request.requestedAt).toISOString()}
@@ -42,7 +40,10 @@ export function AuthorizationRequestCard({request, now}: AuthorizationRequestCar
           {deadlineSeconds}s
         </time>
       )}
-      <p className="text-foreground-subtle truncate text-xs" title={request.key.comment}>
+      <p
+        className="text-foreground-subtle mt-1 truncate text-xs"
+        title={request.key.comment}
+      >
         <RequestDescription request={request} />
       </p>
       <p
@@ -79,28 +80,24 @@ function requestStyle(status: RetainedAuthorizationRequest['status']) {
   switch (status) {
     case 'active':
       return {
-        palette: 'border-request-border bg-request-surface',
         accent: 'text-request-accent',
         muted: 'text-request-muted',
         indicator: 'bg-request-accent',
       };
     case 'signed':
       return {
-        palette: 'border-signed-border bg-signed-surface',
         accent: 'text-signed-accent',
         muted: 'text-signed-muted',
         indicator: 'bg-signed-accent',
       };
     case 'expired':
       return {
-        palette: 'border-expired-border bg-expired-surface',
         accent: 'text-expired-accent',
         muted: 'text-expired-muted',
         indicator: 'bg-expired-accent',
       };
     case 'canceled':
       return {
-        palette: 'border-border-strong bg-surface',
         accent: 'text-foreground-muted',
         muted: 'text-foreground-subtle',
         indicator: 'bg-foreground-muted',
