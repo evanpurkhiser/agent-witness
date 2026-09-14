@@ -1,7 +1,10 @@
-//! Routes locally answerable SSH-agent requests before remote brokering.
+//! Classifies SSH-agent packets and routes them to local or remote handlers.
 
 use bytes::Bytes;
-use tokio::sync::{mpsc, watch};
+use futures_util::{FutureExt, future, future::BoxFuture};
+use thiserror::Error;
+use tokio::sync::{mpsc, oneshot, watch};
+use tokio_util::sync::CancellationToken;
 
 use crate::packet::{
     AgentIdentity, IdentityError, PacketRequest, RequestError, identities_answer,
@@ -10,54 +13,69 @@ use crate::packet::{
 
 const AGENT_FAILURE_FRAME: &[u8] = &[0, 0, 0, 1, 5];
 
-/// Routes identity discovery to the local cache and forwards other requests.
+/// Shared dependencies used to construct an independent router per connection.
+#[derive(Clone)]
 pub struct RequestRouter {
     identities: watch::Receiver<Option<Vec<AgentIdentity>>>,
-    identity_answer: Option<Bytes>,
+    broker: mpsc::Sender<PacketRequest>,
 }
 
 impl RequestRouter {
     pub fn new(
         identities: watch::Receiver<Option<Vec<AgentIdentity>>>,
+        broker: mpsc::Sender<PacketRequest>,
+    ) -> Result<Self, IdentityError> {
+        derive_answer(&identities.borrow())?;
+
+        Ok(Self { identities, broker })
+    }
+
+    /// Create a router whose mutable state belongs to one socket connection.
+    pub fn connection(&self) -> Result<ConnectionRouter, IdentityError> {
+        ConnectionRouter::new(self.identities.clone(), self.broker.clone())
+    }
+}
+
+/// Packet router and mutable state for one socket connection.
+pub struct ConnectionRouter {
+    identities: watch::Receiver<Option<Vec<AgentIdentity>>>,
+    identity_answer: Option<Bytes>,
+    broker: mpsc::Sender<PacketRequest>,
+}
+
+impl ConnectionRouter {
+    fn new(
+        identities: watch::Receiver<Option<Vec<AgentIdentity>>>,
+        broker: mpsc::Sender<PacketRequest>,
     ) -> Result<Self, IdentityError> {
         let identity_answer = derive_answer(&identities.borrow())?;
 
         Ok(Self {
             identities,
             identity_answer,
+            broker,
         })
     }
 
-    /// Serve requests until the local socket closes all request senders.
-    pub async fn serve(
-        mut self,
-        mut requests: mpsc::Receiver<PacketRequest>,
-        broker: mpsc::Sender<PacketRequest>,
-    ) -> Result<(), IdentityError> {
-        while let Some(request) = requests.recv().await {
-            self.refresh_identity_answer()?;
+    /// Classify a packet immediately and return its eventual response.
+    pub(crate) fn route(
+        &mut self,
+        packet: Bytes,
+        cancellation: CancellationToken,
+    ) -> Result<RoutedResponse, RouteError> {
+        self.refresh_identity_answer()?;
 
-            if is_identity_request(&request.packet)
-                && let Some(answer) = self.identity_answer.as_ref()
-            {
-                let _ = request.response.send(Ok(answer.clone()));
-                continue;
-            }
-
-            if is_openssh_session_bind_request(&request.packet) {
-                let _ = request
-                    .response
-                    .send(Ok(Bytes::from_static(AGENT_FAILURE_FRAME)));
-                continue;
-            }
-
-            if let Err(error) = broker.send(request).await {
-                let request = error.0;
-                let _ = request.response.send(Err(RequestError::Unavailable));
-            }
+        if is_identity_request(&packet)
+            && let Some(answer) = self.identity_answer.as_ref()
+        {
+            return Ok(ready_response(answer.clone()));
         }
 
-        Ok(())
+        if is_openssh_session_bind_request(&packet) {
+            return Ok(ready_response(Bytes::from_static(AGENT_FAILURE_FRAME)));
+        }
+
+        Ok(submit(self.broker.clone(), packet, cancellation).boxed())
     }
 
     fn refresh_identity_answer(&mut self) -> Result<(), IdentityError> {
@@ -70,17 +88,47 @@ impl RequestRouter {
     }
 }
 
+pub(crate) type RoutedResponse = BoxFuture<'static, Result<Bytes, RequestError>>;
+
+fn ready_response(response: Bytes) -> RoutedResponse {
+    future::ready(Ok(response)).boxed()
+}
+
+async fn submit(
+    broker: mpsc::Sender<PacketRequest>,
+    packet: Bytes,
+    cancellation: CancellationToken,
+) -> Result<Bytes, RequestError> {
+    let (response, receiver) = oneshot::channel();
+    broker
+        .send(PacketRequest {
+            packet,
+            response,
+            cancellation,
+        })
+        .await
+        .map_err(|_| RequestError::Unavailable)?;
+
+    receiver.await.unwrap_or(Err(RequestError::Unavailable))
+}
+
 fn derive_answer(identities: &Option<Vec<AgentIdentity>>) -> Result<Option<Bytes>, IdentityError> {
     identities.as_deref().map(identities_answer).transpose()
+}
+
+#[derive(Debug, Error)]
+pub(crate) enum RouteError {
+    #[error("paired client identities are invalid")]
+    InvalidIdentities(#[from] IdentityError),
 }
 
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
-    use tokio::sync::{mpsc, oneshot, watch};
+    use tokio::sync::{mpsc, watch};
     use tokio_util::sync::CancellationToken;
 
-    use crate::packet::PacketRequest;
+    use crate::packet::RequestError;
 
     use super::RequestRouter;
 
@@ -88,90 +136,79 @@ mod tests {
     async fn answers_cached_identity_requests_locally() {
         let answer = crate::packet::identities_answer(&[]).unwrap();
         let (_identities, identity_updates) = watch::channel(Some(Vec::new()));
-        let (requests, incoming_requests) = mpsc::channel(1);
         let (broker, mut broker_requests) = mpsc::channel(1);
-        let router = RequestRouter::new(identity_updates).unwrap();
-        let task = tokio::spawn(router.serve(incoming_requests, broker));
-        let (response, receiver) = oneshot::channel();
-
-        requests
-            .send(PacketRequest {
-                packet: Bytes::from_static(&[0, 0, 0, 1, 11]),
-                response,
-                cancellation: CancellationToken::new(),
-            })
-            .await
+        let mut router = RequestRouter::new(identity_updates, broker)
+            .unwrap()
+            .connection()
             .unwrap();
 
-        assert_eq!(receiver.await.unwrap(), Ok(answer));
-        assert!(broker_requests.try_recv().is_err());
+        let response = router
+            .route(
+                Bytes::from_static(&[0, 0, 0, 1, 11]),
+                CancellationToken::new(),
+            )
+            .unwrap()
+            .await;
 
-        drop(requests);
-        task.await.unwrap().unwrap();
+        assert_eq!(response, Ok(answer));
+        assert!(broker_requests.try_recv().is_err());
     }
 
     #[tokio::test]
     async fn forwards_unknown_identity_requests_unchanged() {
         let (_identities, identity_updates) = watch::channel(None);
-        let (requests, incoming_requests) = mpsc::channel(1);
         let (broker, mut broker_requests) = mpsc::channel(1);
-        let router = RequestRouter::new(identity_updates).unwrap();
-        let task = tokio::spawn(router.serve(incoming_requests, broker));
-        let cancellation = CancellationToken::new();
-        let (response, _receiver) = oneshot::channel();
-        let packet = Bytes::from_static(&[0, 0, 0, 1, 11]);
-
-        requests
-            .send(PacketRequest {
-                packet: packet.clone(),
-                response,
-                cancellation: cancellation.clone(),
-            })
-            .await
+        let mut router = RequestRouter::new(identity_updates, broker)
+            .unwrap()
+            .connection()
             .unwrap();
+        let cancellation = CancellationToken::new();
+        let packet = Bytes::from_static(&[0, 0, 0, 1, 11]);
+        let response = router.route(packet.clone(), cancellation.clone()).unwrap();
+        let response_task = tokio::spawn(response);
 
         let forwarded = broker_requests.recv().await.unwrap();
         assert_eq!(forwarded.packet, packet);
         cancellation.cancel();
         assert!(forwarded.cancellation.is_cancelled());
-
-        drop(requests);
-        task.await.unwrap().unwrap();
+        forwarded
+            .response
+            .send(Err(RequestError::Cancelled))
+            .unwrap();
+        assert_eq!(response_task.await.unwrap(), Err(RequestError::Cancelled));
     }
 
     #[tokio::test]
     async fn forwards_signing_requests_when_the_identity_cache_is_known() {
         let (_identities, identity_updates) = watch::channel(Some(Vec::new()));
-        let (requests, incoming_requests) = mpsc::channel(1);
         let (broker, mut broker_requests) = mpsc::channel(1);
-        let router = RequestRouter::new(identity_updates).unwrap();
-        let task = tokio::spawn(router.serve(incoming_requests, broker));
-        let (response, _receiver) = oneshot::channel();
-        let packet = Bytes::from_static(&[0, 0, 0, 1, 13]);
-
-        requests
-            .send(PacketRequest {
-                packet: packet.clone(),
-                response,
-                cancellation: CancellationToken::new(),
-            })
-            .await
+        let mut router = RequestRouter::new(identity_updates, broker)
+            .unwrap()
+            .connection()
             .unwrap();
+        let packet = Bytes::from_static(&[0, 0, 0, 1, 13]);
+        let response = router
+            .route(packet.clone(), CancellationToken::new())
+            .unwrap();
+        let response_task = tokio::spawn(response);
 
-        assert_eq!(broker_requests.recv().await.unwrap().packet, packet);
-
-        drop(requests);
-        task.await.unwrap().unwrap();
+        let forwarded = broker_requests.recv().await.unwrap();
+        assert_eq!(forwarded.packet, packet);
+        forwarded
+            .response
+            .send(Err(RequestError::Cancelled))
+            .unwrap();
+        assert_eq!(response_task.await.unwrap(), Err(RequestError::Cancelled));
     }
 
     #[tokio::test]
     async fn rejects_openssh_session_binding_without_brokering_it() {
         let (_identities, identity_updates) = watch::channel(None);
-        let (requests, incoming_requests) = mpsc::channel(1);
         let (broker, mut broker_requests) = mpsc::channel(1);
-        let router = RequestRouter::new(identity_updates).unwrap();
-        let task = tokio::spawn(router.serve(incoming_requests, broker));
-        let (response, receiver) = oneshot::channel();
+        let mut router = RequestRouter::new(identity_updates, broker)
+            .unwrap()
+            .connection()
+            .unwrap();
         let name = b"session-bind@openssh.com";
         let payload_length = 1 + 4 + name.len();
         let mut packet = Vec::new();
@@ -180,22 +217,12 @@ mod tests {
         packet.extend_from_slice(&(name.len() as u32).to_be_bytes());
         packet.extend_from_slice(name);
 
-        requests
-            .send(PacketRequest {
-                packet: packet.into(),
-                response,
-                cancellation: CancellationToken::new(),
-            })
-            .await
-            .unwrap();
+        let response = router
+            .route(packet.into(), CancellationToken::new())
+            .unwrap()
+            .await;
 
-        assert_eq!(
-            receiver.await.unwrap(),
-            Ok(Bytes::from_static(&[0, 0, 0, 1, 5]))
-        );
+        assert_eq!(response, Ok(Bytes::from_static(&[0, 0, 0, 1, 5])));
         assert!(broker_requests.try_recv().is_err());
-
-        drop(requests);
-        task.await.unwrap().unwrap();
     }
 }

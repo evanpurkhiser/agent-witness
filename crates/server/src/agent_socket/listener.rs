@@ -1,17 +1,16 @@
 use std::{io, path::Path};
 
 use bytes::Bytes;
-use futures_util::{FutureExt, StreamExt, future::BoxFuture, stream::FuturesOrdered};
+use futures_util::{StreamExt, stream::FuturesOrdered};
 use tokio::{
     io::AsyncWriteExt,
     net::{UnixListener, UnixStream},
-    sync::{mpsc, oneshot},
     task::JoinSet,
 };
 use tokio_util::{codec::LengthDelimitedCodec, sync::CancellationToken};
 use tracing::{debug, info, warn};
 
-use crate::packet::{PacketRequest, RequestError};
+use crate::request_router::{ConnectionRouter, RequestRouter};
 
 use super::AgentSocketError;
 
@@ -24,7 +23,7 @@ const MAX_PIPELINED_REQUESTS: usize = 8;
 pub(super) async fn serve(
     listener: &UnixListener,
     path: &Path,
-    requests: mpsc::Sender<PacketRequest>,
+    router: RequestRouter,
     shutdown: CancellationToken,
     max_packet_size: usize,
 ) -> Result<(), AgentSocketError> {
@@ -36,9 +35,15 @@ pub(super) async fn serve(
             () = shutdown.cancelled() => break,
             accepted = listener.accept() => {
                 let (stream, _) = accepted.map_err(AgentSocketError::Accept)?;
-                let requests = requests.clone();
+                let router = match router.connection() {
+                    Ok(router) => router,
+                    Err(error) => {
+                        warn!(%error, "rejecting connection with invalid paired identities");
+                        continue;
+                    }
+                };
                 connections.spawn(async move {
-                    if let Err(error) = handle_connection(stream, requests, max_packet_size).await {
+                    if let Err(error) = handle_connection(stream, router, max_packet_size).await {
                         debug!(%error, "SSH-agent connection closed with an error");
                     }
                 });
@@ -59,7 +64,7 @@ pub(super) async fn serve(
 /// Forward bounded packets while preserving response order for one Unix client.
 async fn handle_connection(
     stream: UnixStream,
-    requests: mpsc::Sender<PacketRequest>,
+    mut router: ConnectionRouter,
     max_packet_size: usize,
 ) -> io::Result<()> {
     let cancellation = CancellationToken::new();
@@ -72,7 +77,7 @@ async fn handle_connection(
         .num_skip(0)
         .max_frame_length(max_packet_size + 4)
         .new_read(reader);
-    let mut responses = FuturesOrdered::<BoxFuture<'static, Result<Bytes, RequestError>>>::new();
+    let mut responses = FuturesOrdered::new();
 
     loop {
         tokio::select! {
@@ -95,14 +100,17 @@ async fn handle_connection(
                     return Ok(());
                 }
 
-                responses.push_back(
-                    submit(
-                        requests.clone(),
-                        packet,
-                        cancellation.child_token(),
-                    )
-                    .boxed(),
-                );
+                let response = match router.route(packet, cancellation.child_token()) {
+                    Ok(response) => response,
+                    Err(error) => {
+                        warn!(%error, "rejecting SSH-agent packet");
+                        if responses.is_empty() {
+                            writer.write_all(AGENT_FAILURE_FRAME).await?;
+                        }
+                        return Ok(());
+                    }
+                };
+                responses.push_back(response);
             }
             response = responses.next(), if !responses.is_empty() => {
                 let response = response
@@ -118,25 +126,6 @@ async fn handle_connection(
     }
 }
 
-/// Submit one complete packet and await its processor response.
-async fn submit(
-    requests: mpsc::Sender<PacketRequest>,
-    packet: Bytes,
-    cancellation: CancellationToken,
-) -> Result<Bytes, RequestError> {
-    let (response, receiver) = oneshot::channel();
-    requests
-        .send(PacketRequest {
-            packet,
-            response,
-            cancellation,
-        })
-        .await
-        .map_err(|_| RequestError::Unavailable)?;
-
-    receiver.await.unwrap_or(Err(RequestError::Unavailable))
-}
-
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
@@ -149,7 +138,7 @@ mod tests {
     };
     use tokio_util::sync::CancellationToken;
 
-    use crate::packet::RequestError;
+    use crate::{packet::RequestError, request_router::RequestRouter};
 
     use super::{super::AgentSocket, AGENT_FAILURE_FRAME};
 
@@ -158,9 +147,9 @@ mod tests {
         let directory = tempdir().unwrap();
         let path = directory.path().join("agent.sock");
         let socket = AgentSocket::bind(path.clone(), 0o600, 1024).await.unwrap();
-        let (requests, mut incoming) = mpsc::channel(1);
+        let (router, mut incoming) = request_router(1);
         let shutdown = CancellationToken::new();
-        let server_task = tokio::spawn(socket.serve(requests, shutdown.clone()));
+        let server_task = tokio::spawn(socket.serve(router, shutdown.clone()));
         let processor_task = tokio::spawn(async move {
             let request = incoming.recv().await.unwrap();
             request.response.send(Err(RequestError::TimedOut)).unwrap();
@@ -184,9 +173,9 @@ mod tests {
         let directory = tempdir().unwrap();
         let path = directory.path().join("agent.sock");
         let socket = AgentSocket::bind(path.clone(), 0o600, 1024).await.unwrap();
-        let (requests, mut incoming) = mpsc::channel(1);
+        let (router, mut incoming) = request_router(1);
         let shutdown = CancellationToken::new();
-        let server_task = tokio::spawn(socket.serve(requests, shutdown.clone()));
+        let server_task = tokio::spawn(socket.serve(router, shutdown.clone()));
 
         let mut client = UnixStream::connect(&path).await.unwrap();
         client.write_all(&[0, 0, 0, 1, 11]).await.unwrap();
@@ -205,9 +194,9 @@ mod tests {
         let directory = tempdir().unwrap();
         let path = directory.path().join("agent.sock");
         let socket = AgentSocket::bind(path.clone(), 0o600, 1024).await.unwrap();
-        let (requests, mut incoming) = mpsc::channel(1);
+        let (router, mut incoming) = request_router(1);
         let shutdown = CancellationToken::new();
-        let server_task = tokio::spawn(socket.serve(requests, shutdown.clone()));
+        let server_task = tokio::spawn(socket.serve(router, shutdown.clone()));
 
         let mut client = UnixStream::connect(&path).await.unwrap();
         client.write_all(&[0, 0, 0, 1, 11]).await.unwrap();
@@ -226,13 +215,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn forwards_complete_frames_without_interpreting_them() {
+    async fn forwards_complete_frames_through_the_router() {
         let directory = tempdir().unwrap();
         let path = directory.path().join("agent.sock");
         let socket = AgentSocket::bind(path.clone(), 0o600, 1024).await.unwrap();
-        let (requests, mut incoming) = mpsc::channel(1);
+        let (router, mut incoming) = request_router(1);
         let shutdown = CancellationToken::new();
-        let server_task = tokio::spawn(socket.serve(requests, shutdown.clone()));
+        let server_task = tokio::spawn(socket.serve(router, shutdown.clone()));
 
         let request = [0, 0, 0, 1, 11];
         let response = [0, 0, 0, 2, 12, 34];
@@ -261,9 +250,9 @@ mod tests {
         let directory = tempdir().unwrap();
         let path = directory.path().join("agent.sock");
         let socket = AgentSocket::bind(path.clone(), 0o600, 1024).await.unwrap();
-        let (requests, mut incoming) = mpsc::channel(2);
+        let (router, mut incoming) = request_router(2);
         let shutdown = CancellationToken::new();
-        let server_task = tokio::spawn(socket.serve(requests, shutdown.clone()));
+        let server_task = tokio::spawn(socket.serve(router, shutdown.clone()));
         let mut client = UnixStream::connect(&path).await.unwrap();
 
         client.write_all(&[0, 0, 0, 1, 11]).await.unwrap();
@@ -292,9 +281,9 @@ mod tests {
         let directory = tempdir().unwrap();
         let path = directory.path().join("agent.sock");
         let socket = AgentSocket::bind(path.clone(), 0o600, 4).await.unwrap();
-        let (requests, mut incoming) = mpsc::channel(1);
+        let (router, mut incoming) = request_router(1);
         let shutdown = CancellationToken::new();
-        let server_task = tokio::spawn(socket.serve(requests, shutdown.clone()));
+        let server_task = tokio::spawn(socket.serve(router, shutdown.clone()));
         let mut client = UnixStream::connect(&path).await.unwrap();
 
         client.write_all(&[0, 0, 0, 1, 11]).await.unwrap();
@@ -317,5 +306,14 @@ mod tests {
 
         shutdown.cancel();
         server_task.await.unwrap().unwrap();
+    }
+    fn request_router(
+        capacity: usize,
+    ) -> (RequestRouter, mpsc::Receiver<crate::packet::PacketRequest>) {
+        let (_identities, identity_updates) = tokio::sync::watch::channel(None);
+        let (broker, requests) = mpsc::channel(capacity);
+        let router = RequestRouter::new(identity_updates, broker).unwrap();
+
+        (router, requests)
     }
 }

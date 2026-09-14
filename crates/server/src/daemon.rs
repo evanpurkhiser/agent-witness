@@ -51,7 +51,6 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     let http_listener = TcpListener::bind(config.http_listen)
         .await
         .with_context(|| format!("could not bind HTTP listener {}", config.http_listen))?;
-    let (local_requests, incoming_requests) = mpsc::channel(config.max_pending_requests);
     let (broker_requests, incoming_broker_requests) =
         mpsc::channel(BROKER_REQUEST_CHANNEL_CAPACITY);
     let (broker, mut broker_task) = BrokerHandle::spawn(
@@ -63,11 +62,9 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
         wakes,
     );
     let shutdown = CancellationToken::new();
-    let mut socket_task = tokio::spawn(socket.serve(local_requests, shutdown.clone()));
-    let request_router =
-        RequestRouter::new(identities).context("paired client identities are invalid")?;
-    let mut request_router_task =
-        tokio::spawn(request_router.serve(incoming_requests, broker_requests));
+    let request_router = RequestRouter::new(identities, broker_requests)
+        .context("paired client identities are invalid")?;
+    let mut socket_task = tokio::spawn(socket.serve(request_router, shutdown.clone()));
     let mut control_task = tokio::spawn(control_socket.serve(pairing.clone(), shutdown.clone()));
     let router = web::router(
         SessionConfig {
@@ -95,9 +92,6 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             result.context("SSH-agent socket task failed")??;
             shutdown.cancel();
             broker.shutdown().await;
-            request_router_task
-                .await
-                .context("request router task failed")??;
             web_task.await.context("HTTP/WebSocket task failed")??;
             control_task.await.context("control socket task failed")??;
             broker_task.await.context("request broker task failed")?;
@@ -110,9 +104,6 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             socket_task
                 .await
                 .context("SSH-agent socket task failed")??;
-            request_router_task
-                .await
-                .context("request router task failed")??;
             control_task.await.context("control socket task failed")??;
             broker_task.await.context("request broker task failed")?;
             return Ok(());
@@ -124,33 +115,15 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
             socket_task
                 .await
                 .context("SSH-agent socket task failed")??;
-            request_router_task
-                .await
-                .context("request router task failed")??;
             web_task.await.context("HTTP/WebSocket task failed")??;
             broker_task.await.context("request broker task failed")?;
             return Ok(());
-        }
-        result = &mut request_router_task => {
-            result.context("request router task failed")??;
-            shutdown.cancel();
-            broker.shutdown().await;
-            socket_task
-                .await
-                .context("SSH-agent socket task failed")??;
-            web_task.await.context("HTTP/WebSocket task failed")??;
-            control_task.await.context("control socket task failed")??;
-            broker_task.await.context("request broker task failed")?;
-            return Err(anyhow::anyhow!("request router stopped unexpectedly"));
         }
         result = &mut broker_task => {
             shutdown.cancel();
             socket_task
                 .await
                 .context("SSH-agent socket task failed")??;
-            request_router_task
-                .await
-                .context("request router task failed")??;
             web_task.await.context("HTTP/WebSocket task failed")??;
             control_task.await.context("control socket task failed")??;
             result.context("request broker task failed")?;
@@ -165,9 +138,6 @@ pub async fn run(config: Config) -> anyhow::Result<()> {
     socket_task
         .await
         .context("SSH-agent socket task failed")??;
-    request_router_task
-        .await
-        .context("request router task failed")??;
     web_task.await.context("HTTP/WebSocket task failed")??;
     control_task.await.context("control socket task failed")??;
     broker_task.await.context("request broker task failed")?;

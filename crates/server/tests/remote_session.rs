@@ -2,9 +2,8 @@ use std::{sync::Arc, time::Duration};
 
 use agent_witness_server::{
     broker::{BrokerConfig, BrokerHandle},
-    packet::{AgentIdentity, PacketRequest, RequestError, identities_answer},
+    packet::{AgentIdentity, PacketRequest, RequestError},
     remote::{MemoryPairingStore, PairingService, SessionConfig},
-    request_router::RequestRouter,
     web,
 };
 use bytes::Bytes;
@@ -26,8 +25,7 @@ async fn websocket_adapts_a_remote_worker_to_the_broker() {
             .unwrap(),
     );
     let mut identity_updates = pairing.subscribe_identities();
-    let (local_requests, incoming_requests) = mpsc::channel(8);
-    let (broker_requests, incoming_broker_requests) = mpsc::channel(1);
+    let (local_requests, incoming_broker_requests) = mpsc::channel(1);
     let (wakes, _wake_requests) = mpsc::unbounded_channel();
     let (broker, broker_task) = BrokerHandle::spawn(
         BrokerConfig {
@@ -37,8 +35,6 @@ async fn websocket_adapts_a_remote_worker_to_the_broker() {
         incoming_broker_requests,
         wakes,
     );
-    let request_router = RequestRouter::new(pairing.subscribe_identities()).unwrap();
-    let router_task = tokio::spawn(request_router.serve(incoming_requests, broker_requests));
     let shutdown = CancellationToken::new();
     let app = web::router(
         SessionConfig {
@@ -107,20 +103,6 @@ async fn websocket_adapts_a_remote_worker_to_the_broker() {
         .await
         .unwrap()
         .unwrap();
-
-    let request_packet = Bytes::from_static(b"\0\0\0\x01\x0b");
-    let response_packet = identities_answer(&identities).unwrap();
-    let (response, response_receiver) = oneshot::channel();
-    local_requests
-        .send(PacketRequest {
-            packet: request_packet.clone(),
-            response,
-            cancellation: CancellationToken::new(),
-        })
-        .await
-        .unwrap();
-
-    assert_eq!(response_receiver.await.unwrap().unwrap(), response_packet);
 
     let sign_request = Bytes::from_static(b"\0\0\0\x01\x0d");
     let sign_response = Bytes::from_static(b"\0\0\0\x01\x0e");
@@ -200,7 +182,6 @@ async fn websocket_adapts_a_remote_worker_to_the_broker() {
 
     shutdown.cancel();
     drop(local_requests);
-    router_task.await.unwrap().unwrap();
     broker.shutdown().await;
     broker_task.await.unwrap();
     web_task.abort();

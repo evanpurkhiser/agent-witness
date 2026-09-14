@@ -3,10 +3,10 @@
 use std::{io, path::PathBuf};
 
 use thiserror::Error;
-use tokio::{net::UnixListener, sync::mpsc};
+use tokio::net::UnixListener;
 use tokio_util::sync::CancellationToken;
 
-use crate::packet::PacketRequest;
+use crate::request_router::RequestRouter;
 
 use self::file::SocketFile;
 
@@ -39,13 +39,13 @@ impl AgentSocket {
     /// Serve local connections until shutdown while retaining ownership of the socket file.
     pub async fn serve(
         self,
-        requests: mpsc::Sender<PacketRequest>,
+        router: RequestRouter,
         shutdown: CancellationToken,
     ) -> Result<(), AgentSocketError> {
         listener::serve(
             &self.listener,
             self.file.path(),
-            requests,
+            router,
             shutdown,
             self.max_packet_size,
         )
