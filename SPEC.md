@@ -146,7 +146,8 @@ Owns everything that requires a visible, foreground browser context.
 - Send the resulting push subscription to the dedicated worker
 - Start and stop the dedicated Web Worker
 - Invoke WebAuthn and request the PRF output
-- Display pending SSH authentication requests
+- Display pending SSH authentication requests with their reason, command, and
+  signing key when request context is available
 - Show connection, vault, and approval state
 - Handle vault creation, key import, pairing, and settings
 - Transfer unlock material to the Web Worker

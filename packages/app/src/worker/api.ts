@@ -2,6 +2,7 @@
 // secret-free views it returns. The typestate vault lives inside the worker;
 // the page only ever sees these snapshots.
 
+import type {RequestContext} from 'app/remote/protocol';
 import type {ConnectionSnapshot, PushSubscriptionRegistration} from 'app/remote/session';
 import type {Bytes} from 'app/utils/bytes';
 import type {KeyType, Vault} from 'app/vault/types';
@@ -55,6 +56,7 @@ export interface AuthorizationRequestView {
   attempt: number;
   requestedAt: number;
   deadline: number;
+  context?: RequestContext;
   key: Pick<KeyView, 'id' | 'comment'>;
 }
 

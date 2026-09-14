@@ -10,10 +10,10 @@ import type {
   VaultSnapshot,
 } from 'app/worker/api';
 
-import {AuthorizationRequestCard} from './AuthorizationRequestCard';
-import {useRetainedAuthorizationRequests} from './useRetainedAuthorizationRequests';
+import {AuthorizationRequestGroup} from './AuthorizationRequestGroup';
+import {useRetainedAuthorizationRequestGroups} from './useRetainedAuthorizationRequestGroups';
 
-const cardVariants: Variants = {
+const groupVariants: Variants = {
   hidden: {opacity: 0, scale: 0.9, y: 15},
   visible: (index = 0) => ({
     opacity: 1,
@@ -27,7 +27,7 @@ const cardVariants: Variants = {
   }),
 };
 
-interface AuthorizationRequestListProps {
+interface AuthorizationGroupListProps {
   requests: AuthorizationRequestView[];
   settled: SettledAuthorizationView[];
   error: string | null;
@@ -38,7 +38,7 @@ interface AuthorizationRequestListProps {
   onForgetPairing(): void;
 }
 
-export function AuthorizationRequestList({
+export function AuthorizationGroupList({
   requests,
   settled,
   error,
@@ -47,9 +47,9 @@ export function AuthorizationRequestList({
   working,
   onCreateVault,
   onForgetPairing,
-}: AuthorizationRequestListProps) {
-  const retained = useRetainedAuthorizationRequests(requests, settled);
-  const now = useCurrentTime(retained.length > 0);
+}: AuthorizationGroupListProps) {
+  const groups = useRetainedAuthorizationRequestGroups(requests, settled);
+  const now = useCurrentTime(groups.length > 0);
 
   return (
     <section
@@ -72,7 +72,7 @@ export function AuthorizationRequestList({
       </header>
 
       <div className="grid min-h-0 flex-1 overflow-y-auto overscroll-contain">
-        {retained.length === 0 && (
+        {groups.length === 0 && (
           <motion.div
             className="col-start-1 row-start-1 flex min-h-48 items-center justify-center px-4"
             initial={{opacity: 0}}
@@ -89,23 +89,23 @@ export function AuthorizationRequestList({
           </motion.div>
         )}
         <motion.ol
-          aria-label="Authorization requests"
+          aria-label="Authorization request groups"
           aria-live="polite"
-          className={`col-start-1 row-start-1 grid content-start gap-2 ${retained.length === 0 ? 'pointer-events-none' : ''}`}
+          className={`col-start-1 row-start-1 grid content-start gap-2 ${groups.length === 0 ? 'pointer-events-none' : ''}`}
         >
           <AnimatePresence>
-            {retained.map((request, index) => (
+            {groups.map((group, index) => (
               <motion.li
-                key={`${request.id}:${request.attempt}`}
+                key={group.key}
                 layout="position"
                 custom={index}
-                variants={cardVariants}
+                variants={groupVariants}
                 initial="hidden"
                 animate="visible"
                 exit="exit"
                 className="origin-top list-none"
               >
-                <AuthorizationRequestCard request={request} now={now} />
+                <AuthorizationRequestGroup group={group} now={now} />
               </motion.li>
             ))}
           </AnimatePresence>

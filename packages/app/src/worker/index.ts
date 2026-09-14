@@ -139,6 +139,7 @@ class WorkerSession implements WorkerApi {
           attempt: request.attempt,
           requestedAt: request.requestedAt,
           deadline: request.deadline,
+          context: request.context,
           key: {id: key.id, comment: key.comment},
         },
       ];

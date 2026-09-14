@@ -7,7 +7,7 @@ import type {
 
 import {ConfigurationMenu} from '../configuration/ConfigurationMenu';
 
-import {AuthorizationRequestList} from './AuthorizationRequestList';
+import {AuthorizationGroupList} from './AuthorizationGroupList';
 import {AuthorizeButton} from './AuthorizeButton';
 import {ConnectionStatus} from './ConnectionStatus';
 
@@ -36,7 +36,7 @@ export function SigningScreen({
 }: SigningScreenProps) {
   return (
     <main className="bg-canvas text-foreground fixed inset-0 grid grid-rows-[minmax(0,1fr)_auto] gap-3 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(0.75rem,env(safe-area-inset-bottom))] font-mono">
-      <AuthorizationRequestList
+      <AuthorizationGroupList
         requests={authorizationRequests}
         settled={settledAuthorizations}
         error={error ?? connection.error}
