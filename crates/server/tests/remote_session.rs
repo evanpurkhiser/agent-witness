@@ -110,6 +110,7 @@ async fn websocket_adapts_a_remote_worker_to_the_broker() {
     local_requests
         .send(PacketRequest {
             packet: sign_request.clone(),
+            context: None,
             response,
             cancellation: CancellationToken::new(),
         })
@@ -142,6 +143,7 @@ async fn websocket_adapts_a_remote_worker_to_the_broker() {
     local_requests
         .send(PacketRequest {
             packet: sign_request.clone(),
+            context: None,
             response,
             cancellation: cancellation.clone(),
         })

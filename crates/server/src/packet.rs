@@ -20,6 +20,14 @@ pub struct AgentIdentity {
     pub comment: String,
 }
 
+/// Caller-provided explanation shared by requests on one SSH-agent connection.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RequestContext {
+    pub group_id: String,
+    pub reason: String,
+    pub command: Vec<String>,
+}
+
 /// Return whether a complete packet is an SSH-agent identity-list request.
 pub fn is_identity_request(packet: &[u8]) -> bool {
     let Some(mut payload) = packet_payload(packet) else {
@@ -123,6 +131,9 @@ pub enum IdentityError {
 pub struct PacketRequest {
     /// Complete length-prefixed SSH-agent packet.
     pub packet: Bytes,
+
+    /// Context established when the local connection opened.
+    pub context: Option<RequestContext>,
 
     /// Channel used to return the final response.
     pub response: oneshot::Sender<Result<Bytes, RequestError>>,

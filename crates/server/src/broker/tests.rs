@@ -43,6 +43,7 @@ async fn submit_local(
     requests
         .send(PacketRequest {
             packet,
+            context: None,
             response,
             cancellation: CancellationToken::new(),
         })
@@ -452,6 +453,7 @@ async fn actor_forwards_local_cancellation_to_the_remote() {
     requests
         .send(PacketRequest {
             packet: Bytes::from_static(b"request"),
+            context: None,
             response,
             cancellation: cancellation.clone(),
         })

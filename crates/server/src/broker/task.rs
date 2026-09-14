@@ -231,6 +231,7 @@ impl BrokerActor {
         let (abort, registration) = AbortHandle::new_pair();
         let PacketRequest {
             packet,
+            context: _,
             response,
             cancellation,
         } = request;
