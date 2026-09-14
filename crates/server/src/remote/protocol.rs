@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::{
     broker::{RemoteCommand, RequestId, SessionId},
-    packet::{AgentIdentity, identities_answer},
+    packet::{AgentIdentity, RequestContext, identities_answer},
 };
 
 const VERSION: u8 = 1;
@@ -22,8 +22,8 @@ const MAX_IDENTITY_KEY_BLOB_LENGTH: usize = 16 * 1024;
 const MAX_IDENTITY_COMMENT_LENGTH: usize = 1024;
 const MAX_IDENTITIES_ANSWER_LENGTH: usize = 256 * 1024;
 
-/// Reserved headroom for non-packet fields, including push registration.
-pub const MAX_MESSAGE_OVERHEAD: usize = 8 * 1024;
+/// Reserved headroom for non-packet fields, including request context.
+pub const MAX_MESSAGE_OVERHEAD: usize = 32 * 1024;
 
 /// Messages accepted from a remote client.
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -154,6 +154,8 @@ pub enum ServerMessage {
         requested_at: u64,
         deadline: u64,
         packet: Bytes,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        context: Option<RequestContext>,
     },
     CancelRequest {
         #[serde(with = "uuid::serde::hyphenated")]
@@ -172,12 +174,14 @@ impl From<RemoteCommand> for ServerMessage {
                 requested_at,
                 deadline,
                 packet,
+                context,
             } => Self::AgentRequest {
                 request_id,
                 attempt,
                 requested_at,
                 deadline,
                 packet,
+                context,
             },
             RemoteCommand::Cancel {
                 request_id,

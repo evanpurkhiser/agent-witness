@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use agent_witness_server::{
     broker::{BrokerConfig, BrokerHandle},
-    packet::{AgentIdentity, PacketRequest, RequestError},
+    packet::{AgentIdentity, PacketRequest, RequestContext, RequestError},
     remote::{MemoryPairingStore, PairingService, SessionConfig},
     web,
 };
@@ -106,11 +106,16 @@ async fn websocket_adapts_a_remote_worker_to_the_broker() {
 
     let sign_request = Bytes::from_static(b"\0\0\0\x01\x0d");
     let sign_response = Bytes::from_static(b"\0\0\0\x01\x0e");
+    let context = RequestContext {
+        group_id: "release-123".into(),
+        reason: "Push the release".into(),
+        command: vec!["git".into(), "push".into()],
+    };
     let (response, response_receiver) = oneshot::channel();
     local_requests
         .send(PacketRequest {
             packet: sign_request.clone(),
-            context: None,
+            context: Some(context.clone()),
             response,
             cancellation: CancellationToken::new(),
         })
@@ -120,11 +125,13 @@ async fn websocket_adapts_a_remote_worker_to_the_broker() {
         request_id,
         attempt,
         packet,
+        context: received_context,
     } = receive(&mut remote).await
     else {
         panic!("expected an agent request")
     };
     assert_eq!(packet, sign_request);
+    assert_eq!(received_context, Some(context));
 
     send(
         &mut remote,
@@ -153,11 +160,13 @@ async fn websocket_adapts_a_remote_worker_to_the_broker() {
         request_id,
         attempt,
         packet,
+        context,
     } = receive(&mut remote).await
     else {
         panic!("expected an agent request")
     };
     assert_eq!(packet, sign_request);
+    assert_eq!(context, None);
 
     cancellation.cancel();
 
@@ -255,6 +264,7 @@ enum ServerMessage {
         request_id: String,
         attempt: u32,
         packet: Bytes,
+        context: Option<RequestContext>,
     },
     CancelRequest {
         request_id: String,

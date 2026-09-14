@@ -16,6 +16,10 @@ const MAX_PUSH_ENDPOINT_LENGTH = 4096;
 const MAX_IDENTITIES = 64;
 const MAX_IDENTITY_KEY_BLOB_LENGTH = 16 * 1024;
 const MAX_IDENTITY_COMMENT_LENGTH = 1024;
+const MAX_CONTEXT_GROUP_ID_LENGTH = 128;
+const MAX_CONTEXT_REASON_LENGTH = 512;
+const MAX_CONTEXT_COMMAND_ARGUMENTS = 128;
+const MAX_CONTEXT_COMMAND_LENGTH = 16 * 1024;
 const MAX_U32 = 0xffffffff;
 
 const bytesSchema = z.custom<Bytes>(
@@ -67,6 +71,32 @@ const wireIdentitySchema = z.object({
 const identitySchema = z.object({
   keyBlob: identityKeyBlobSchema,
   comment: identityCommentSchema,
+});
+const contextGroupIdSchema = printableTextSchema(
+  MAX_CONTEXT_GROUP_ID_LENGTH,
+  'context group ID',
+);
+const contextReasonSchema = printableTextSchema(
+  MAX_CONTEXT_REASON_LENGTH,
+  'context reason',
+);
+const contextCommandSchema = z
+  .array(z.string())
+  .min(1)
+  .max(MAX_CONTEXT_COMMAND_ARGUMENTS)
+  .refine(
+    command => utf8Length(command.join('')) <= MAX_CONTEXT_COMMAND_LENGTH,
+    `context command cannot exceed ${MAX_CONTEXT_COMMAND_LENGTH} UTF-8 bytes`,
+  );
+const wireRequestContextSchema = z.object({
+  group_id: contextGroupIdSchema,
+  reason: contextReasonSchema,
+  command: contextCommandSchema,
+});
+const requestContextSchema = z.object({
+  groupId: contextGroupIdSchema,
+  reason: contextReasonSchema,
+  command: contextCommandSchema,
 });
 
 const clientWireMessageSchema = z.discriminatedUnion('type', [
@@ -170,6 +200,7 @@ const serverWireMessageSchema = z.discriminatedUnion('type', [
     requested_at: deadlineSchema,
     deadline: deadlineSchema,
     packet: bytesSchema,
+    context: wireRequestContextSchema.optional(),
   }),
   z.object({
     type: z.literal('cancel_request'),
@@ -206,6 +237,7 @@ const serverMessageSchema = z.discriminatedUnion('type', [
     requestedAt: deadlineSchema,
     deadline: deadlineSchema,
     packet: bytesSchema,
+    context: requestContextSchema.optional(),
   }),
   z.object({
     type: z.literal('cancel_request'),
@@ -229,6 +261,7 @@ const serverMessageCodec = z.codec(serverWireMessageSchema, serverMessageSchema,
 
 export type ClientMessage = z.output<typeof clientMessageCodec>;
 export type ServerMessage = z.output<typeof serverMessageCodec>;
+export type RequestContext = z.output<typeof requestContextSchema>;
 
 export type ClientHandshake = Extract<
   ClientMessage,
@@ -274,4 +307,24 @@ export function encodeClientMessage(message: ClientMessage): Bytes {
  */
 export function decodeServerMessage(frame: Bytes): ServerMessage {
   return serverCodec.decode(frame).message;
+}
+
+function printableTextSchema(maxLength: number, label: string) {
+  return z
+    .string()
+    .refine(
+      value => utf8Length(value) > 0 && utf8Length(value) <= maxLength,
+      `${label} must contain between 1 and ${maxLength} UTF-8 bytes`,
+    )
+    .refine(
+      value =>
+        Array.from(value).every(
+          character => character === ' ' || !/[\p{Cc}\p{White_Space}]/u.test(character),
+        ),
+      `${label} must be printable`,
+    );
+}
+
+function utf8Length(value: string): number {
+  return new TextEncoder().encode(value).length;
 }

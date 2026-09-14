@@ -6,7 +6,7 @@ use std::{
 use bytes::Bytes;
 use thiserror::Error;
 
-use crate::packet::RequestError;
+use crate::packet::{RequestContext, RequestError};
 
 use super::{RequestId, SessionId};
 
@@ -68,6 +68,7 @@ impl BrokerState {
             Event::Submit {
                 request_id,
                 packet,
+                context,
                 deadline,
                 requested_at,
                 deadline_timestamp,
@@ -84,6 +85,7 @@ impl BrokerState {
                         request_id,
                         PendingRequest {
                             packet,
+                            context,
                             deadline,
                             requested_at,
                             deadline_timestamp,
@@ -269,6 +271,7 @@ impl BrokerState {
                     requested_at: pending.requested_at,
                     deadline: pending.deadline_timestamp,
                     packet: pending.packet.clone(),
+                    context: pending.context.clone(),
                 });
                 in_flight += 1;
             }
@@ -340,6 +343,7 @@ impl BrokerState {
 
 struct PendingRequest {
     packet: Bytes,
+    context: Option<RequestContext>,
     deadline: Instant,
     requested_at: u64,
     deadline_timestamp: u64,
@@ -359,6 +363,7 @@ pub(super) enum Event {
     Submit {
         request_id: RequestId,
         packet: Bytes,
+        context: Option<RequestContext>,
         deadline: Instant,
         requested_at: u64,
         deadline_timestamp: u64,
@@ -397,6 +402,7 @@ pub(super) enum Effect {
         requested_at: u64,
         deadline: u64,
         packet: Bytes,
+        context: Option<RequestContext>,
     },
     Cancel {
         session_id: SessionId,

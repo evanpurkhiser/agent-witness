@@ -608,7 +608,7 @@ enum ClientMessage {
     AgentResponse {
         request_id: Uuid,
         attempt: u32,
-        payload: Vec<u8>,
+        packet: Vec<u8>,
     },
     SetPushSubscription {
         endpoint: String,
@@ -636,13 +636,22 @@ enum ServerMessage {
     AgentRequest {
         request_id: Uuid,
         attempt: u32,
-        payload: Vec<u8>,
+        requested_at: u64,
+        deadline: u64,
+        packet: Vec<u8>,
+        context: Option<RequestContext>,
     },
     CancelRequest {
         request_id: Uuid,
         attempt: u32,
     },
     Ping,
+}
+
+struct RequestContext {
+    group_id: String,
+    reason: String,
+    command: Vec<String>,
 }
 ```
 
@@ -652,7 +661,8 @@ The server assigns the connection's session ID and does not process
 authenticated, the server may send `AgentRequest` while the client reports
 locked. The worker buffers it in memory and uses the request event to prompt the
 page for unlock. `CancelRequest` removes a buffered or active attempt when its
-local caller expires.
+local caller expires. Request context is an optional additive field so clients
+remain compatible with contextless connections and older servers.
 
 Each application message occupies exactly one binary WebSocket message and
 contains one named-field MessagePack value:

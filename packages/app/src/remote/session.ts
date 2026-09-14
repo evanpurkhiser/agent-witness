@@ -9,6 +9,7 @@ import {
   decodeServerMessage,
   encodeClientMessage,
   type ClientMessage,
+  type RequestContext,
   type ServerMessage,
 } from './protocol';
 
@@ -66,6 +67,7 @@ export interface RemoteRequest {
   requestedAt: number;
   deadline: number;
   packet: Bytes;
+  context?: RequestContext;
 }
 
 export type RemoteRequestOutcome = 'signed' | 'expired' | 'canceled';
@@ -746,5 +748,6 @@ function toRemoteRequest(request: PendingRequest | RemoteRequest): RemoteRequest
     requestedAt: request.requestedAt,
     deadline: request.deadline,
     packet: request.packet,
+    context: request.context,
   };
 }

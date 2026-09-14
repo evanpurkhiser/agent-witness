@@ -191,6 +191,38 @@ describe('decodeServerMessage', () => {
     });
   });
 
+  it('decodes request context to camel-case fields', () => {
+    expect(
+      decodeServerMessage(
+        serverFrame({
+          type: 'agent_request',
+          request_id: CLIENT_ID,
+          attempt: 4,
+          requested_at: 1_799_999_910_000,
+          deadline: 1_800_000_000_000,
+          packet: bytes(0, 0, 0, 1, 13),
+          context: {
+            group_id: 'release-123',
+            reason: 'Push the release',
+            command: ['git', 'push'],
+          },
+        }),
+      ),
+    ).toEqual({
+      type: 'agent_request',
+      requestId: CLIENT_ID,
+      attempt: 4,
+      requestedAt: 1_799_999_910_000,
+      deadline: 1_800_000_000_000,
+      packet: bytes(0, 0, 0, 1, 13),
+      context: {
+        groupId: 'release-123',
+        reason: 'Push the release',
+        command: ['git', 'push'],
+      },
+    });
+  });
+
   it.each([
     [
       {

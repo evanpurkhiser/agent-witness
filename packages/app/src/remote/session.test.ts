@@ -287,6 +287,11 @@ describe('RemoteSession', () => {
     await settle();
 
     const packet = signPacket();
+    const context = {
+      group_id: 'release-123',
+      reason: 'Push the release',
+      command: ['git', 'push'],
+    };
     socket.receive({
       type: 'agent_request',
       request_id: REQUEST_ID,
@@ -294,6 +299,7 @@ describe('RemoteSession', () => {
       requested_at: 1_799_999_910_000,
       deadline,
       packet,
+      context,
     });
     await settle();
 
@@ -303,6 +309,11 @@ describe('RemoteSession', () => {
       requestedAt: 1_799_999_910_000,
       deadline,
       packet,
+      context: {
+        groupId: 'release-123',
+        reason: 'Push the release',
+        command: ['git', 'push'],
+      },
     };
     expect(session.pendingRequests()).toEqual([request]);
 

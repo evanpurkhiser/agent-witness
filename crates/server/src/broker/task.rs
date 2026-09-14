@@ -231,7 +231,7 @@ impl BrokerActor {
         let (abort, registration) = AbortHandle::new_pair();
         let PacketRequest {
             packet,
-            context: _,
+            context,
             response,
             cancellation,
         } = request;
@@ -247,6 +247,7 @@ impl BrokerActor {
             Event::Submit {
                 request_id,
                 packet,
+                context,
                 deadline: now + self.config.request_timeout,
                 requested_at: unix_milliseconds(requested_at),
                 deadline_timestamp: unix_milliseconds(requested_at + self.config.request_timeout),
@@ -350,6 +351,7 @@ impl BrokerActor {
                     requested_at,
                     deadline,
                     packet,
+                    context,
                 } => {
                     let sent = self
                         .remote
@@ -364,6 +366,7 @@ impl BrokerActor {
                                     requested_at,
                                     deadline,
                                     packet,
+                                    context,
                                 })
                                 .is_ok()
                         });

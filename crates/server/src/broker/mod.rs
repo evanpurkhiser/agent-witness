@@ -10,6 +10,8 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+use crate::packet::RequestContext;
+
 mod model;
 mod task;
 
@@ -53,6 +55,9 @@ pub enum RemoteCommand {
 
         /// Complete length-prefixed SSH-agent packet.
         packet: Bytes,
+
+        /// Context established by the originating local connection.
+        context: Option<RequestContext>,
     },
 
     /// Stop remote work whose local caller has expired or cancelled.

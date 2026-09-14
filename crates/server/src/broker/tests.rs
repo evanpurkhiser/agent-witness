@@ -8,7 +8,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::packet::{PacketRequest, RequestError};
+use crate::packet::{PacketRequest, RequestContext, RequestError};
 
 use super::{
     BrokerConfig, BrokerHandle, RemoteCommand,
@@ -26,6 +26,7 @@ fn submit(
             Event::Submit {
                 request_id,
                 packet: Bytes::from_static(packet),
+                context: None,
                 deadline: now + Duration::from_secs(30),
                 requested_at: 1_799_999_970_000,
                 deadline_timestamp: 1_800_000_000_000,
@@ -188,6 +189,70 @@ fn disconnect_requeues_with_a_new_attempt() {
         )
         .unwrap();
     assert!(stale.is_empty());
+}
+
+#[test]
+fn reconnect_preserves_request_context() {
+    let now = Instant::now();
+    let request_id = Uuid::new_v4();
+    let first_session = Uuid::new_v4();
+    let second_session = Uuid::new_v4();
+    let mut state = BrokerState::new(8);
+    let context = RequestContext {
+        group_id: "release-123".into(),
+        reason: "Push the release".into(),
+        command: vec!["git".into(), "push".into()],
+    };
+
+    state
+        .apply(
+            Event::Submit {
+                request_id,
+                packet: Bytes::from_static(b"request"),
+                context: Some(context.clone()),
+                deadline: now + Duration::from_secs(30),
+                requested_at: 1_799_999_970_000,
+                deadline_timestamp: 1_800_000_000_000,
+            },
+            now,
+        )
+        .unwrap();
+    state
+        .apply(
+            Event::Connected {
+                session_id: first_session,
+                capacity: 1,
+            },
+            now,
+        )
+        .unwrap();
+    state
+        .apply(
+            Event::Disconnected {
+                session_id: first_session,
+            },
+            now,
+        )
+        .unwrap();
+    let effects = state
+        .apply(
+            Event::Connected {
+                session_id: second_session,
+                capacity: 1,
+            },
+            now,
+        )
+        .unwrap();
+
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::Dispatch {
+            request_id: dispatched,
+            attempt: 2,
+            context: Some(dispatched_context),
+            ..
+        }] if *dispatched == request_id && dispatched_context == &context
+    ));
 }
 
 #[test]
@@ -403,11 +468,13 @@ async fn actor_forwards_and_correlates_a_request() {
         requested_at,
         deadline,
         packet,
+        context,
     } = remote.commands.recv().await.unwrap()
     else {
         panic!("expected a request")
     };
     assert_eq!(packet, Bytes::from_static(b"request"));
+    assert_eq!(context, None);
     assert_eq!(deadline - requested_at, 1_000);
     let remaining = deadline.saturating_sub(
         std::time::SystemTime::now()
