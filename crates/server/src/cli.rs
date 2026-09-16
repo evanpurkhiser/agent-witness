@@ -12,7 +12,7 @@ use crate::{
     config::{Config, ConfigOverrides},
     control, daemon,
     packet::RequestContext,
-    send_context,
+    request_router::context,
 };
 
 #[derive(Debug, Parser)]
@@ -35,15 +35,15 @@ enum Command {
     /// Run the agent-witness daemon.
     Serve(ServeArgs),
 
-    /// Send an authentication reason and command metadata to an SSH agent.
+    /// Write an SSH-agent request context packet to stdout.
     ///
-    /// Sends a context@agent-witness extension packet, waits for acknowledgement,
-    /// and closes the connection. Context applies only to that connection.
-    /// The command after -- is sent as metadata and is not executed.
+    /// Outputs one binary, length-prefixed context@agent-witness extension packet
+    /// for a wrapper to prepend to an SSH-agent connection. The command after --
+    /// is included as metadata and is not executed.
     #[command(
-        after_help = "Example:\n  agent-witness send-context --reason \"Push the release\" --groupId d371fa50458a41918893d00139c781a2 -- git push origin main"
+        after_help = "Example:\n  agent-witness write-context --reason \"Push the release\" --groupId d371fa50458a41918893d00139c781a2 -- git push origin main"
     )]
-    SendContext(SendContextArgs),
+    WriteContext(WriteContextArgs),
 
     /// Manage the paired remote client.
     Pairing {
@@ -64,11 +64,7 @@ struct ServeArgs {
 }
 
 #[derive(Debug, Args)]
-struct SendContextArgs {
-    /// Unix socket to send context to; defaults to the SSH_AGENT_SOCK environment variable.
-    #[arg(long, value_name = "PATH")]
-    socket: Option<PathBuf>,
-
+struct WriteContextArgs {
     /// Required explanation shown with authentication requests (1–512 UTF-8 bytes, single line).
     #[arg(long, value_name = "TEXT")]
     reason: String,
@@ -102,22 +98,25 @@ pub async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Serve(args) => serve(cli.config, cli.control_socket, args).await,
-        Command::SendContext(args) => {
-            let socket = args
-                .socket
-                .or_else(|| std::env::var_os("SSH_AGENT_SOCK").map(PathBuf::from))
-                .context("provide --socket or set SSH_AGENT_SOCK")?;
-            let context = RequestContext {
-                group_id: args.group_id.unwrap_or_else(uuid::Uuid::new_v4),
-                reason: args.reason,
-                command: args.argv,
-            };
-            send_context::send(&socket, &context).await
-        }
+        Command::WriteContext(args) => write_context(args),
         Command::Pairing {
             command: PairingCommand::Clear(args),
         } => clear_pairing(cli.config, cli.control_socket, args).await,
     }
+}
+
+fn write_context(args: WriteContextArgs) -> anyhow::Result<()> {
+    let context = RequestContext {
+        group_id: args.group_id.unwrap_or_else(uuid::Uuid::new_v4),
+        reason: args.reason,
+        command: args.argv,
+    };
+    let packet = context::encode(&context)?;
+    let mut stdout = io::stdout().lock();
+    stdout
+        .write_all(&packet)
+        .context("could not write request context")?;
+    stdout.flush().context("could not flush request context")
 }
 
 async fn serve(
@@ -223,9 +222,7 @@ mod tests {
     fn parses_context_metadata_without_consuming_command_flags() {
         let cli = Cli::try_parse_from([
             "agent-witness",
-            "send-context",
-            "--socket",
-            "/tmp/agent.sock",
+            "write-context",
             "--reason",
             "Push the release",
             "--groupId",
@@ -238,13 +235,9 @@ mod tests {
             "",
         ])
         .unwrap();
-        let Command::SendContext(args) = cli.command else {
-            panic!("expected send-context")
+        let Command::WriteContext(args) = cli.command else {
+            panic!("expected write-context")
         };
-        assert_eq!(
-            args.socket.unwrap(),
-            std::path::PathBuf::from("/tmp/agent.sock")
-        );
         assert_eq!(args.reason, "Push the release");
         assert_eq!(
             args.group_id,
@@ -258,7 +251,7 @@ mod tests {
         assert!(
             Cli::try_parse_from([
                 "agent-witness",
-                "send-context",
+                "write-context",
                 "--reason",
                 "Push",
                 "--groupId",
@@ -271,24 +264,23 @@ mod tests {
     }
 
     #[test]
-    fn context_requires_reason_and_command_but_allows_default_socket_and_group() {
-        assert!(Cli::try_parse_from(["agent-witness", "send-context", "--", "git"]).is_err());
+    fn context_requires_reason_and_command_but_allows_default_group() {
+        assert!(Cli::try_parse_from(["agent-witness", "write-context", "--", "git"]).is_err());
         assert!(
-            Cli::try_parse_from(["agent-witness", "send-context", "--reason", "Push"]).is_err()
+            Cli::try_parse_from(["agent-witness", "write-context", "--reason", "Push"]).is_err()
         );
         let cli = Cli::try_parse_from([
             "agent-witness",
-            "send-context",
+            "write-context",
             "--reason",
             "Push",
             "--",
             "git",
         ])
         .unwrap();
-        let Command::SendContext(args) = cli.command else {
-            panic!("expected send-context")
+        let Command::WriteContext(args) = cli.command else {
+            panic!("expected write-context")
         };
-        assert!(args.socket.is_none());
         assert!(args.group_id.is_none());
     }
 
