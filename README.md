@@ -88,3 +88,11 @@ The workflow requires passing lint, tests, and Docker build checks for its base
 commit. It updates the manifests and Cargo lockfile, then pushes a release commit
 and matching `vX.Y.Z` tag together. If `main` advances during the workflow, rerun
 it against the new commit.
+
+After pushing the tag, Bump dispatches the Release workflow. Release verifies the
+tag against the Cargo workspace version and triggers the agent-witness package
+build in `evanpurkhiser/PKGBUILDs`. It also accepts version-tag pushes and manual
+dispatches on a version tag.
+
+The repository secret `AUR_BUMP_DISPATCH_PAT` must contain a token with
+`actions:write` and `contents:read` access to `evanpurkhiser/PKGBUILDs`.
