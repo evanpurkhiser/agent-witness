@@ -11,6 +11,39 @@ const MAX_REASON_SIZE: usize = 512;
 const MAX_COMMAND_ARGUMENTS: usize = 128;
 const MAX_COMMAND_SIZE: usize = 16 * 1024;
 
+/// Encode a complete context frame using the same limits as the receiver.
+pub fn encode(context: &RequestContext) -> Result<Bytes, ContextError> {
+    decode_text(context.reason.as_bytes(), MAX_REASON_SIZE).ok_or(ContextError::InvalidReason)?;
+    if !(1..=MAX_COMMAND_ARGUMENTS).contains(&context.command.len())
+        || context.command.iter().map(String::len).sum::<usize>() > MAX_COMMAND_SIZE
+    {
+        return Err(ContextError::InvalidCommand);
+    }
+
+    let mut packet = vec![0; 4];
+    packet.push(SSH_AGENTC_EXTENSION);
+    push_string(&mut packet, CONTEXT_EXTENSION);
+    packet.push(CONTEXT_VERSION);
+    push_string(
+        &mut packet,
+        context.group_id.simple().to_string().as_bytes(),
+    );
+    push_string(&mut packet, context.reason.as_bytes());
+    packet.extend_from_slice(&(context.command.len() as u32).to_be_bytes());
+    for argument in &context.command {
+        push_string(&mut packet, argument.as_bytes());
+    }
+
+    let length = (packet.len() - 4) as u32;
+    packet[..4].copy_from_slice(&length.to_be_bytes());
+    Ok(packet.into())
+}
+
+fn push_string(packet: &mut Vec<u8>, value: &[u8]) {
+    packet.extend_from_slice(&(value.len() as u32).to_be_bytes());
+    packet.extend_from_slice(value);
+}
+
 /// Decode an Agent Witness context extension, leaving other agent packets untouched.
 pub(super) fn decode(packet: &Bytes) -> Result<Option<RequestContext>, ContextError> {
     let Some(mut decoder) = Decoder::packet(packet) else {
@@ -124,7 +157,7 @@ impl<'a> Decoder<'a> {
 }
 
 #[derive(Clone, Copy, Debug, Error, Eq, PartialEq)]
-pub(crate) enum ContextError {
+pub enum ContextError {
     #[error("malformed Agent Witness context extension")]
     Malformed,
 
@@ -147,7 +180,53 @@ mod tests {
 
     use crate::packet::RequestContext;
 
-    use super::{CONTEXT_EXTENSION, ContextError, decode};
+    use super::{CONTEXT_EXTENSION, ContextError, decode, encode};
+
+    #[test]
+    fn encodes_context_with_exact_argument_boundaries() {
+        let context = RequestContext {
+            group_id: "d371fa50-458a-4191-8893-d00139c781a2".parse().unwrap(),
+            reason: "Push the release".into(),
+            command: vec![
+                "git".into(),
+                "push".into(),
+                "release candidate".into(),
+                "".into(),
+            ],
+        };
+        let packet = encode(&context).unwrap();
+
+        assert_eq!(
+            packet,
+            context_packet(
+                "d371fa50458a41918893d00139c781a2",
+                "Push the release",
+                &["git", "push", "release candidate", ""]
+            )
+        );
+        assert_eq!(decode(&packet), Ok(Some(context)));
+    }
+
+    #[test]
+    fn rejects_oversized_context_before_encoding() {
+        let context = RequestContext {
+            group_id: uuid::Uuid::new_v4(),
+            reason: "r".repeat(513),
+            command: vec!["git".into()],
+        };
+        assert_eq!(encode(&context), Err(ContextError::InvalidReason));
+        let context = RequestContext {
+            reason: "Push".into(),
+            command: vec!["x".repeat(16 * 1024 + 1)],
+            ..context
+        };
+        assert_eq!(encode(&context), Err(ContextError::InvalidCommand));
+        let context = RequestContext {
+            command: vec!["".into(); 129],
+            ..context
+        };
+        assert_eq!(encode(&context), Err(ContextError::InvalidCommand));
+    }
 
     #[test]
     fn decodes_a_context_extension() {

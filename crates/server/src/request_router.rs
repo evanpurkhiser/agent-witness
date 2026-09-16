@@ -13,7 +13,7 @@ use crate::packet::{
 
 use self::context::ContextError;
 
-mod context;
+pub mod context;
 
 const AGENT_FAILURE_FRAME: &[u8] = &[0, 0, 0, 1, 5];
 const AGENT_SUCCESS_FRAME: &[u8] = &[0, 0, 0, 1, 6];
