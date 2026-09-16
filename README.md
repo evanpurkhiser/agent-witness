@@ -74,6 +74,21 @@ client credential hash. Clear the current pairing through the running daemon:
 agent-witness pairing clear
 ```
 
+## Systemd
+
+The Arch package installs `agent-witness.service`. Configure the daemon in
+`/etc/agent-witness.toml`, then enable and start the service. Systemd manages
+`/run/agent-witness` and `/var/lib/agent-witness` with root-only access.
+
+To retain pairing across restarts, configure:
+
+```toml
+state_path = "/var/lib/agent-witness/state.json"
+```
+
+Use a systemd drop-in to grant a local group access to the runtime directory,
+and set `socket_mode` in the daemon configuration for access to the agent socket.
+
 ## Versioning
 
 The Cargo workspace version is shared by the server and both JavaScript package
