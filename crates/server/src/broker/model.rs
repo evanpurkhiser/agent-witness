@@ -8,7 +8,7 @@ use thiserror::Error;
 
 use crate::packet::{RequestContext, RequestError};
 
-use super::{RequestId, SessionId};
+use super::{RequestId, SessionId, WakeRequest};
 
 /// Availability facts for the single remote agent.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -95,6 +95,8 @@ impl BrokerState {
                         },
                     );
                     self.queue.push_back(request_id);
+                    // New work should remind the user even when its reason is unchanged.
+                    self.wake_announced = false;
                 }
             }
             Event::Connected {
@@ -281,7 +283,16 @@ impl BrokerState {
             self.wake_announced = false;
         } else if !self.wake_announced {
             self.wake_announced = true;
-            effects.push(Effect::WakeRequired);
+            let mut seen = std::collections::HashSet::new();
+            let reasons = self
+                .queue
+                .iter()
+                .filter_map(|id| self.pending.get(id)?.context.as_ref())
+                .map(|context| &context.reason)
+                .filter(|reason| seen.insert(*reason))
+                .cloned()
+                .collect();
+            effects.push(Effect::WakeRequired(WakeRequest { reasons }));
         }
 
         effects
@@ -409,7 +420,7 @@ pub(super) enum Effect {
         request_id: RequestId,
         attempt: u32,
     },
-    WakeRequired,
+    WakeRequired(WakeRequest),
     Complete {
         request_id: RequestId,
         result: Result<Bytes, RequestError>,

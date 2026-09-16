@@ -26,6 +26,13 @@ pub type RequestId = Uuid;
 /// Stable identity assigned to one remote WebSocket session.
 pub type SessionId = Uuid;
 
+/// Display context for a coalesced request to wake the remote browser.
+#[derive(Debug, Eq, PartialEq)]
+pub struct WakeRequest {
+    /// Distinct pending reasons in request order.
+    pub reasons: Vec<String>,
+}
+
 /// Runtime limits enforced by the request broker.
 #[derive(Clone, Copy, Debug)]
 pub struct BrokerConfig {

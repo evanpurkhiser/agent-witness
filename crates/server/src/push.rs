@@ -14,14 +14,17 @@ use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use bytes::Bytes;
 use p256::{SecretKey, elliptic_curve::sec1::ToEncodedPoint};
 use serde::{Deserialize, Serialize};
-use tokio::{sync::mpsc, time::timeout};
+use tokio::{
+    sync::mpsc,
+    time::{sleep, timeout},
+};
 use tracing::{info, warn};
 use web_push::{
     ContentEncoding, HyperWebPushClient, SubscriptionInfo, Urgency, VapidSignatureBuilder,
     WebPushClient, WebPushMessage, WebPushMessageBuilder,
 };
 
-use crate::remote::PairingService;
+use crate::{broker::WakeRequest, remote::PairingService};
 
 const PRIVATE_KEY_LENGTH: usize = 32;
 const PRIVATE_KEY_MODE: u32 = 0o600;
@@ -82,9 +85,15 @@ impl PushService {
     }
 
     /// Deliver each coalesced wake edge without blocking the request broker.
-    pub async fn serve(self, mut wakes: mpsc::UnboundedReceiver<()>) {
-        while wakes.recv().await.is_some() {
-            match self.publish().await {
+    pub async fn serve(self, mut wakes: mpsc::UnboundedReceiver<WakeRequest>) {
+        while let Some(mut request) = wakes.recv().await {
+            // Combine a burst of queue updates before sending the latest summary.
+            sleep(Duration::from_millis(200)).await;
+            while let Ok(latest) = wakes.try_recv() {
+                request = latest;
+            }
+
+            match self.publish(request).await {
                 Ok(true) => info!("Web Push notification accepted"),
                 Ok(false) => {}
                 Err(error) => warn!(%error, "could not publish Web Push notification"),
@@ -92,11 +101,11 @@ impl PushService {
         }
     }
 
-    async fn publish(&self) -> anyhow::Result<bool> {
+    async fn publish(&self, request: WakeRequest) -> anyhow::Result<bool> {
         let Some(subscription) = self.pairing.push_subscription().await else {
             return Ok(false);
         };
-        let message = build_notification(subscription, &self.vapid, self.ttl)?;
+        let message = build_notification(subscription, &self.vapid, self.ttl, &request.reasons)?;
 
         timeout(DELIVERY_TIMEOUT, self.client.send(message))
             .await
@@ -111,6 +120,7 @@ fn build_notification(
     subscription: PushSubscription,
     vapid: &VapidKey,
     ttl: u32,
+    reasons: &[String],
 ) -> anyhow::Result<WebPushMessage> {
     let subscription = SubscriptionInfo::new(
         subscription.endpoint,
@@ -121,7 +131,7 @@ fn build_notification(
         .context("could not create VAPID signature")?
         .build()
         .context("could not sign Web Push request")?;
-    let payload = notification_payload()?;
+    let payload = notification_payload(reasons)?;
     let mut message = WebPushMessageBuilder::new(&subscription);
     message.set_ttl(ttl);
     message.set_urgency(Urgency::High);
@@ -131,16 +141,24 @@ fn build_notification(
     message.build().context("could not build Web Push request")
 }
 
-fn notification_payload() -> anyhow::Result<Vec<u8>> {
+fn notification_payload(reasons: &[String]) -> anyhow::Result<Vec<u8>> {
     #[derive(Serialize)]
     struct Notification<'a> {
         title: &'a str,
         body: &'a str,
     }
 
+    let body = reasons.first().map(|reason| {
+        let summary = format!("Signing request: {reason}");
+        if reasons.len() == 1 {
+            return summary;
+        }
+
+        format!("{summary} ({}× more)", reasons.len() - 1)
+    });
     serde_json::to_vec(&Notification {
         title: NOTIFICATION_TITLE,
-        body: NOTIFICATION_BODY,
+        body: body.as_deref().unwrap_or(NOTIFICATION_BODY),
     })
     .context("could not encode notification payload")
 }
@@ -278,6 +296,33 @@ mod tests {
     }
 
     #[test]
+    fn summarizes_additional_reasons_in_the_notification_body() {
+        let payload = notification_payload(&[
+            "Push the release".into(),
+            "Deploy nginx".into(),
+            "Fetch changes".into(),
+        ])
+        .unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+        assert_eq!(
+            payload["body"],
+            "Signing request: Push the release (2× more)"
+        );
+    }
+
+    #[test]
+    fn includes_the_request_reason_in_the_notification_body() {
+        let payload = notification_payload(&["Push the release".into()]).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&payload).unwrap(),
+            serde_json::json!({
+                "title": NOTIFICATION_TITLE,
+                "body": "Signing request: Push the release",
+            })
+        );
+    }
+
+    #[test]
     fn builds_an_encrypted_notification_with_display_only_content() {
         let vapid = generate().unwrap();
         let message = build_notification(
@@ -289,6 +334,7 @@ mod tests {
             },
             &vapid,
             90,
+            &["Push the release".into()],
         )
         .unwrap();
 
@@ -296,7 +342,8 @@ mod tests {
         assert_eq!(message.urgency, Some(Urgency::High));
         assert!(message.payload.is_some());
         assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(&notification_payload().unwrap()).unwrap(),
+            serde_json::from_slice::<serde_json::Value>(&notification_payload(&[]).unwrap())
+                .unwrap(),
             serde_json::json!({
                 "title": NOTIFICATION_TITLE,
                 "body": NOTIFICATION_BODY,

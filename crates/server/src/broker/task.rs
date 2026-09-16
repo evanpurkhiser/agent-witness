@@ -20,7 +20,7 @@ use uuid::Uuid;
 use crate::packet::{PacketRequest, RequestError};
 
 use super::{
-    BrokerConfig, BrokerError, RemoteCommand, RemoteConnection, RequestId, SessionId,
+    BrokerConfig, BrokerError, RemoteCommand, RemoteConnection, RequestId, SessionId, WakeRequest,
     model::{BrokerState, Effect, Event, ModelError},
 };
 
@@ -35,7 +35,7 @@ impl BrokerHandle {
     pub fn spawn(
         config: BrokerConfig,
         local_requests: mpsc::Receiver<PacketRequest>,
-        wakes: mpsc::UnboundedSender<()>,
+        wakes: mpsc::UnboundedSender<WakeRequest>,
     ) -> (Self, JoinHandle<()>) {
         let (commands, receiver) = mpsc::channel(128);
         let task = tokio::spawn(run_broker(config, local_requests, receiver, wakes));
@@ -157,7 +157,7 @@ struct BrokerActor {
     state: BrokerState,
     waiters: HashMap<RequestId, Waiter>,
     remote: Option<(SessionId, mpsc::UnboundedSender<RemoteCommand>)>,
-    wakes: mpsc::UnboundedSender<()>,
+    wakes: mpsc::UnboundedSender<WakeRequest>,
 }
 
 struct Waiter {
@@ -171,7 +171,7 @@ async fn run_broker(
     config: BrokerConfig,
     mut local_requests: mpsc::Receiver<PacketRequest>,
     mut commands: mpsc::Receiver<Command>,
-    wakes: mpsc::UnboundedSender<()>,
+    wakes: mpsc::UnboundedSender<WakeRequest>,
 ) {
     let mut actor = BrokerActor {
         config,
@@ -395,8 +395,8 @@ impl BrokerActor {
                         });
                     }
                 }
-                Effect::WakeRequired => {
-                    let _ = self.wakes.send(());
+                Effect::WakeRequired(request) => {
+                    let _ = self.wakes.send(request);
                 }
                 Effect::Complete { request_id, result } => {
                     if let Some(waiter) = self.waiters.remove(&request_id) {

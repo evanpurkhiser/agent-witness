@@ -734,9 +734,13 @@ Example payload:
 ```json
 {
   "title": "SSH authentication requested",
-  "body": "A server is requesting SSH authentication."
+  "body": "Signing request: Push the release"
 }
 ```
+
+The body uses `Signing request: <reason>` for the first distinct queued reason,
+with ` (N× more)` for additional distinct reasons. A queue without context
+uses `A server is requesting SSH authentication.`
 
 Avoid putting the following into the push payload:
 
@@ -745,8 +749,10 @@ Avoid putting the following into the push payload:
 - Commands
 - Raw agent packets
 
-Also coalesce notifications. If ten requests arrive while the phone is offline,
-send one notification rather than ten.
+Queue updates within 200 ms are coalesced into the latest summary. Notifications
+share a tag so later summaries replace the displayed signing notification and
+alert again. Each newly queued request triggers an update, including requests
+with an existing reason. Routine broker ticks do not repeat notifications.
 
 ### Persistent state
 

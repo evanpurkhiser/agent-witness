@@ -8,12 +8,13 @@ interface PushPayload {
 serviceWorker.addEventListener('push', event => {
   const payload = event.data!.json() as PushPayload;
 
-  event.waitUntil(
-    serviceWorker.registration.showNotification(payload.title, {
-      body: payload.body,
-      data: {url: '/'},
-    }),
-  );
+  const options = {
+    body: payload.body,
+    data: {url: '/'},
+    tag: 'signing-requests',
+    renotify: true,
+  };
+  event.waitUntil(serviceWorker.registration.showNotification(payload.title, options));
 });
 
 serviceWorker.addEventListener('notificationclick', event => {

@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::packet::{PacketRequest, RequestContext, RequestError};
 
 use super::{
-    BrokerConfig, BrokerHandle, RemoteCommand,
+    BrokerConfig, BrokerHandle, RemoteCommand, WakeRequest,
     model::{BrokerState, Effect, Event},
 };
 
@@ -55,6 +55,46 @@ async fn submit_local(
 }
 
 #[test]
+fn wake_summarizes_unique_reasons_and_updates_when_the_queue_changes() {
+    let now = Instant::now();
+    let mut state = BrokerState::new(8);
+    let request = |reason: &str| Event::Submit {
+        request_id: Uuid::new_v4(),
+        packet: Bytes::from_static(b"request"),
+        context: Some(RequestContext {
+            group_id: Uuid::new_v4(),
+            reason: reason.into(),
+            command: vec!["git".into()],
+        }),
+        deadline: now + Duration::from_secs(30),
+        requested_at: 1_799_999_970_000,
+        deadline_timestamp: 1_800_000_000_000,
+    };
+    let effects = state.apply(request("Push the release"), now).unwrap();
+    assert!(
+        matches!(effects.as_slice(), [Effect::WakeRequired(WakeRequest { reasons })] if reasons == &["Push the release"])
+    );
+    let effects = state.apply(request("Push the release"), now).unwrap();
+    assert!(
+        matches!(effects.as_slice(), [Effect::WakeRequired(WakeRequest { reasons })] if reasons == &["Push the release"])
+    );
+    let effects = submit(&mut state, Uuid::new_v4(), b"contextless", now);
+    assert!(
+        matches!(effects.as_slice(), [Effect::WakeRequired(WakeRequest { reasons })] if reasons == &["Push the release"])
+    );
+
+    let effects = state.apply(request("Deploy nginx"), now).unwrap();
+    assert!(
+        matches!(effects.as_slice(), [Effect::WakeRequired(WakeRequest { reasons })] if reasons == &["Push the release", "Deploy nginx"])
+    );
+    let effects = state.apply(request("Deploy nginx"), now).unwrap();
+    assert!(
+        matches!(effects.as_slice(), [Effect::WakeRequired(WakeRequest { reasons })] if reasons == &["Push the release", "Deploy nginx"])
+    );
+    assert!(state.apply(Event::Tick, now).unwrap().is_empty());
+}
+
+#[test]
 fn every_request_queues_before_dispatch() {
     let now = Instant::now();
     let request_id = Uuid::new_v4();
@@ -62,7 +102,10 @@ fn every_request_queues_before_dispatch() {
     let mut state = BrokerState::new(8);
 
     let effects = submit(&mut state, request_id, b"request", now);
-    assert!(matches!(effects.as_slice(), [Effect::WakeRequired]));
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::WakeRequired(WakeRequest { reasons })] if reasons.is_empty()
+    ));
 
     let effects = state
         .apply(
@@ -568,7 +611,7 @@ async fn actor_times_out_without_a_remote() {
         timeout(Duration::from_secs(1), wake_requests.recv()),
         timeout(Duration::from_secs(1), submit),
     );
-    assert_eq!(wake.unwrap(), Some(()));
+    assert_eq!(wake.unwrap(), Some(WakeRequest { reasons: vec![] }));
     let result = result.unwrap();
     assert_eq!(result, Err(RequestError::TimedOut));
 
