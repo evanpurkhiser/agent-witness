@@ -29,7 +29,7 @@ use crate::{broker::WakeRequest, remote::PairingService};
 const PRIVATE_KEY_LENGTH: usize = 32;
 const PRIVATE_KEY_MODE: u32 = 0o600;
 const DELIVERY_TIMEOUT: Duration = Duration::from_secs(10);
-const NOTIFICATION_TITLE: &str = "SSH authentication requested";
+const NOTIFICATION_TITLE: &str = "Signing request";
 const NOTIFICATION_BODY: &str = "A server is requesting SSH authentication.";
 
 /// Browser-generated values required to encrypt and deliver a Web Push message.

@@ -733,7 +733,7 @@ Example payload:
 
 ```json
 {
-  "title": "SSH authentication requested",
+  "title": "Signing request",
   "body": "Signing request: Push the release"
 }
 ```
