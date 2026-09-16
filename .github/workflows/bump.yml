@@ -1,0 +1,98 @@
+name: Bump
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Semantic version (example: 0.2.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Bump version
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate version input
+        run: |
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Version must be semver like 0.2.0"
+            exit 1
+          fi
+
+      - name: Ensure tag does not already exist
+        run: |
+          TAG="v${VERSION}"
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "Tag ${TAG} already exists"
+            exit 1
+          fi
+
+      - name: Ensure checks are passing on the release base
+        run: |
+          SHA=$(git rev-parse HEAD)
+          for workflow in lint.yml build.yml; do
+            RUN_ID=$(gh run list --workflow="$workflow" --branch=main --event=push \
+              --commit "$SHA" --limit=1 --json databaseId --jq '.[0].databaseId // empty')
+            if [[ -z "$RUN_ID" ]]; then
+              echo "No ${workflow} run found for ${SHA}" >&2
+              exit 1
+            fi
+            gh run watch "$RUN_ID" --exit-status --compact
+            CONCLUSION=$(gh run view "$RUN_ID" --json conclusion --jq '.conclusion')
+            if [[ "$CONCLUSION" != success ]]; then
+              echo "${workflow} did not succeed for ${SHA}: ${CONCLUSION}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Set up toolchain
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+
+      - name: Install cargo-edit
+        run: cargo install cargo-edit --version 0.13.9 --locked
+
+      - name: Bump package versions
+        run: |
+          cargo set-version --workspace "$VERSION"
+          pnpm --recursive --include-workspace-root version "$VERSION" --no-git-checks --no-git-tag-version
+
+      - name: Update lockfile
+        run: cargo update --workspace
+
+      - name: Commit and tag release
+        env:
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
+        run: |
+          git add Cargo.toml Cargo.lock package.json packages/app/package.json
+          git commit -m "release v${VERSION}"
+          git tag -a "v${VERSION}" -m "Release v${VERSION}"
+
+      - name: Push commit and tag
+        run: |
+          gh auth setup-git
+          git push --atomic origin HEAD:main "refs/tags/v${VERSION}"

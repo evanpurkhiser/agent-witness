@@ -73,3 +73,18 @@ client credential hash. Clear the current pairing through the running daemon:
 ```console
 agent-witness pairing clear
 ```
+
+## Versioning
+
+The Cargo workspace version is shared by the server and both JavaScript package
+manifests. To bump it, run the Bump workflow on `main` with a semantic
+version:
+
+```console
+gh workflow run bump.yml --ref main -f version=0.2.0
+```
+
+The workflow requires passing lint, tests, and Docker build checks for its base
+commit. It updates the manifests and Cargo lockfile, then pushes a release commit
+and matching `vX.Y.Z` tag together. If `main` advances during the workflow, rerun
+it against the new commit.
