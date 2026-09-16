@@ -25,7 +25,8 @@ describe('AuthorizationRequestGroup', () => {
       />,
     );
 
-    expect(html.match(/Push the release/g)).toHaveLength(1);
+    expect(html.match(/<h2\b[^>]*>Push the release<\/h2>/g)).toHaveLength(1);
+    expect(html).toContain('aria-label="Requests for Push the release"');
     expect(html).toContain('git push &#x27;release candidate&#x27;');
     expect(html).toContain('phone key');
     expect(html).toContain('backup key');
