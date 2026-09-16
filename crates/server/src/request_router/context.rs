@@ -7,7 +7,6 @@ const CONTEXT_EXTENSION: &[u8] = b"context@agent-witness";
 const CONTEXT_VERSION: u8 = 1;
 const SSH_AGENTC_EXTENSION: u8 = 27;
 
-const MAX_GROUP_ID_SIZE: usize = 128;
 const MAX_REASON_SIZE: usize = 512;
 const MAX_COMMAND_ARGUMENTS: usize = 128;
 const MAX_COMMAND_SIZE: usize = 16 * 1024;
@@ -29,7 +28,9 @@ pub(super) fn decode(packet: &Bytes) -> Result<Option<RequestContext>, ContextEr
         return Err(ContextError::UnsupportedVersion);
     }
 
-    let group_id = decode_text(decoder.take_string()?, MAX_GROUP_ID_SIZE)
+    let group_id = std::str::from_utf8(decoder.take_string()?)
+        .ok()
+        .and_then(|value| uuid::Uuid::parse_str(value).ok())
         .ok_or(ContextError::InvalidGroupId)?;
     let reason =
         decode_text(decoder.take_string()?, MAX_REASON_SIZE).ok_or(ContextError::InvalidReason)?;
@@ -150,12 +151,16 @@ mod tests {
 
     #[test]
     fn decodes_a_context_extension() {
-        let packet = context_packet("release-123", "Push the release", &["git", "push"]);
+        let packet = context_packet(
+            "d371fa50-458a-4191-8893-d00139c781a2",
+            "Push the release",
+            &["git", "push"],
+        );
 
         assert_eq!(
             decode(&packet),
             Ok(Some(RequestContext {
-                group_id: "release-123".into(),
+                group_id: "d371fa50-458a-4191-8893-d00139c781a2".parse().unwrap(),
                 reason: "Push the release".into(),
                 command: vec!["git".into(), "push".into()],
             }))
@@ -172,8 +177,19 @@ mod tests {
     }
 
     #[test]
+    fn rejects_non_uuid_group_ids() {
+        for group_id in ["release-123", "", "d371fa50-458a-4191-8893-d00139c781az"] {
+            assert_eq!(
+                decode(&context_packet(group_id, "Push", &["git"])),
+                Err(ContextError::InvalidGroupId)
+            );
+        }
+    }
+
+    #[test]
     fn rejects_invalid_context_contents() {
-        let mut unsupported = context_packet("release-123", "Push", &["git"]).to_vec();
+        let mut unsupported =
+            context_packet("d371fa50-458a-4191-8893-d00139c781a2", "Push", &["git"]).to_vec();
         let version_offset = 4 + 1 + 4 + CONTEXT_EXTENSION.len();
         unsupported[version_offset] = 2;
         assert_eq!(
@@ -186,18 +202,26 @@ mod tests {
             Err(ContextError::InvalidGroupId)
         );
         assert_eq!(
-            decode(&context_packet("release-123", "Push\nrelease", &["git"])),
+            decode(&context_packet(
+                "d371fa50-458a-4191-8893-d00139c781a2",
+                "Push\nrelease",
+                &["git"]
+            )),
             Err(ContextError::InvalidReason)
         );
         assert_eq!(
-            decode(&context_packet("release-123", "Push", &[])),
+            decode(&context_packet(
+                "d371fa50-458a-4191-8893-d00139c781a2",
+                "Push",
+                &[]
+            )),
             Err(ContextError::InvalidCommand)
         );
     }
 
     #[test]
     fn rejects_truncated_and_trailing_context_data() {
-        let packet = context_packet("release-123", "Push", &["git"]);
+        let packet = context_packet("d371fa50-458a-4191-8893-d00139c781a2", "Push", &["git"]);
         assert_eq!(
             decode(&packet.slice(..packet.len() - 1)),
             Ok(None),

@@ -650,7 +650,7 @@ enum ServerMessage {
 }
 
 struct RequestContext {
-    group_id: String,
+    group_id: Uuid,
     reason: String,
     command: Vec<String>,
 }

@@ -23,7 +23,8 @@ pub struct AgentIdentity {
 /// Caller-provided explanation shared by requests on one SSH-agent connection.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RequestContext {
-    pub group_id: String,
+    #[serde(with = "uuid::serde::simple")]
+    pub group_id: uuid::Uuid,
     pub reason: String,
     pub command: Vec<String>,
 }
@@ -168,6 +169,31 @@ mod tests {
         AgentIdentity, identities_answer, is_identity_request, is_openssh_session_bind_request,
     };
     use bytes::Bytes;
+
+    #[test]
+    fn context_group_ids_use_uuid_strings_on_the_wire() {
+        let context = super::RequestContext {
+            group_id: uuid::Uuid::new_v4(),
+            reason: "Push".into(),
+            command: vec!["git".into()],
+        };
+        let encoded = rmp_serde::to_vec_named(&context).unwrap();
+        let wire: serde_json::Value = rmp_serde::from_slice(&encoded).unwrap();
+        assert_eq!(wire["group_id"], context.group_id.simple().to_string());
+        assert_eq!(
+            rmp_serde::from_slice::<super::RequestContext>(&encoded).unwrap(),
+            context
+        );
+
+        let invalid =
+            serde_json::json!({"group_id": "release-123", "reason": "Push", "command": ["git"]});
+        assert!(
+            rmp_serde::from_slice::<super::RequestContext>(
+                &rmp_serde::to_vec_named(&invalid).unwrap()
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn recognizes_only_complete_identity_requests() {

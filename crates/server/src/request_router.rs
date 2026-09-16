@@ -270,7 +270,7 @@ mod tests {
             .connection()
             .unwrap();
         let context = RequestContext {
-            group_id: "release-123".into(),
+            group_id: "d371fa50-458a-4191-8893-d00139c781a2".parse().unwrap(),
             reason: "Push the release".into(),
             command: vec!["git".into(), "push".into()],
         };
@@ -314,7 +314,7 @@ mod tests {
         let mut contextual = factory.connection().unwrap();
         let mut ordinary = factory.connection().unwrap();
         let context = RequestContext {
-            group_id: "release-123".into(),
+            group_id: "d371fa50-458a-4191-8893-d00139c781a2".parse().unwrap(),
             reason: "Push the release".into(),
             command: vec!["git".into(), "push".into()],
         };
@@ -356,7 +356,7 @@ mod tests {
             .connection()
             .unwrap();
         let context = RequestContext {
-            group_id: "release-123".into(),
+            group_id: "d371fa50-458a-4191-8893-d00139c781a2".parse().unwrap(),
             reason: "Push the release".into(),
             command: vec!["git".into(), "push".into()],
         };
@@ -379,7 +379,10 @@ mod tests {
         let mut payload = vec![27];
         push_string(&mut payload, name);
         payload.push(version);
-        push_string(&mut payload, context.group_id.as_bytes());
+        push_string(
+            &mut payload,
+            context.group_id.simple().to_string().as_bytes(),
+        );
         push_string(&mut payload, context.reason.as_bytes());
         payload.extend_from_slice(&(context.command.len() as u32).to_be_bytes());
         for argument in &context.command {

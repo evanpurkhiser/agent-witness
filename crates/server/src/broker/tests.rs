@@ -199,7 +199,7 @@ fn reconnect_preserves_request_context() {
     let second_session = Uuid::new_v4();
     let mut state = BrokerState::new(8);
     let context = RequestContext {
-        group_id: "release-123".into(),
+        group_id: "d371fa50-458a-4191-8893-d00139c781a2".parse().unwrap(),
         reason: "Push the release".into(),
         command: vec!["git".into(), "push".into()],
     };

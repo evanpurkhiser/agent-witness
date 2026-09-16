@@ -16,7 +16,6 @@ const MAX_PUSH_ENDPOINT_LENGTH = 4096;
 const MAX_IDENTITIES = 64;
 const MAX_IDENTITY_KEY_BLOB_LENGTH = 16 * 1024;
 const MAX_IDENTITY_COMMENT_LENGTH = 1024;
-const MAX_CONTEXT_GROUP_ID_LENGTH = 128;
 const MAX_CONTEXT_REASON_LENGTH = 512;
 const MAX_CONTEXT_COMMAND_ARGUMENTS = 128;
 const MAX_CONTEXT_COMMAND_LENGTH = 16 * 1024;
@@ -72,10 +71,7 @@ const identitySchema = z.object({
   keyBlob: identityKeyBlobSchema,
   comment: identityCommentSchema,
 });
-const contextGroupIdSchema = printableTextSchema(
-  MAX_CONTEXT_GROUP_ID_LENGTH,
-  'context group ID',
-);
+const contextGroupIdSchema = z.string().regex(/^[0-9a-f]{32}$/, 'Invalid UUID');
 const contextReasonSchema = printableTextSchema(
   MAX_CONTEXT_REASON_LENGTH,
   'context reason',

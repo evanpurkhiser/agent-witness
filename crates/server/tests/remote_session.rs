@@ -107,7 +107,7 @@ async fn websocket_adapts_a_remote_worker_to_the_broker() {
     let sign_request = Bytes::from_static(b"\0\0\0\x01\x0d");
     let sign_response = Bytes::from_static(b"\0\0\0\x01\x0e");
     let context = RequestContext {
-        group_id: "release-123".into(),
+        group_id: "d371fa50-458a-4191-8893-d00139c781a2".parse().unwrap(),
         reason: "Push the release".into(),
         command: vec!["git".into(), "push".into()],
     };

@@ -288,7 +288,7 @@ describe('RemoteSession', () => {
 
     const packet = signPacket();
     const context = {
-      group_id: 'release-123',
+      group_id: 'd371fa50458a41918893d00139c781a2',
       reason: 'Push the release',
       command: ['git', 'push'],
     };
@@ -310,7 +310,7 @@ describe('RemoteSession', () => {
       deadline,
       packet,
       context: {
-        groupId: 'release-123',
+        groupId: 'd371fa50458a41918893d00139c781a2',
         reason: 'Push the release',
         command: ['git', 'push'],
       },
