@@ -27,6 +27,20 @@ phone, add it to the Home Screen, and launch it from there.
 Development pairing state and the VAPID key persist in the ignored `.dev`
 directory. Press Ctrl-C to stop both processes.
 
+## Sending request context
+
+Send command metadata to an SSH-agent socket:
+
+```console
+agent-witness send-context --socket /path/to/agent.sock \
+  --reason "Push the release" --groupId d371fa50458a41918893d00139c781a2 -- git push origin main
+```
+
+`--socket` defaults to `SSH_AGENT_SOCK`. The reason and argv after `--` are
+required; omitting `--groupId` generates a UUID. The command sends the context
+packet, waits for acknowledgement, and exits. The argv is metadata only.
+Context is scoped to the socket connection, which closes when this command exits.
+
 ## Production build
 
 Install the pinned toolchain and JavaScript dependencies, then build the
