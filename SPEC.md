@@ -734,11 +734,11 @@ Example payload:
 ```json
 {
   "title": "Signing request",
-  "body": "Signing request: Push the release"
+  "body": "Push the release"
 }
 ```
 
-The body uses `Signing request: <reason>` for the first distinct queued reason,
+The body uses the first distinct queued reason,
 with ` (N× more)` for additional distinct reasons. A queue without context
 uses `A server is requesting SSH authentication.`
 

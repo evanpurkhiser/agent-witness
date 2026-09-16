@@ -149,12 +149,11 @@ fn notification_payload(reasons: &[String]) -> anyhow::Result<Vec<u8>> {
     }
 
     let body = reasons.first().map(|reason| {
-        let summary = format!("Signing request: {reason}");
         if reasons.len() == 1 {
-            return summary;
+            return reason.clone();
         }
 
-        format!("{summary} ({}× more)", reasons.len() - 1)
+        format!("{reason} ({}× more)", reasons.len() - 1)
     });
     serde_json::to_vec(&Notification {
         title: NOTIFICATION_TITLE,
@@ -304,10 +303,7 @@ mod tests {
         ])
         .unwrap();
         let payload: serde_json::Value = serde_json::from_slice(&payload).unwrap();
-        assert_eq!(
-            payload["body"],
-            "Signing request: Push the release (2× more)"
-        );
+        assert_eq!(payload["body"], "Push the release (2× more)");
     }
 
     #[test]
@@ -317,7 +313,7 @@ mod tests {
             serde_json::from_slice::<serde_json::Value>(&payload).unwrap(),
             serde_json::json!({
                 "title": NOTIFICATION_TITLE,
-                "body": "Signing request: Push the release",
+                "body": "Push the release",
             })
         );
     }
