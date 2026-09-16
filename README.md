@@ -27,6 +27,24 @@ phone, add it to the Home Screen, and launch it from there.
 Development pairing state and the VAPID key persist in the ignored `.dev`
 directory. Press Ctrl-C to stop both processes.
 
+## Writing request context
+
+Write a binary, length-prefixed SSH-agent context packet to stdout:
+
+```console
+agent-witness write-context --reason "Push the release" \
+  --groupId d371fa50458a41918893d00139c781a2 -- git push origin main > context.packet
+```
+
+The reason and argv after `--` are required; omitting `--groupId` generates a
+UUID. The argv is metadata only. Group UUIDs use 32 hexadecimal characters on
+the wire.
+
+This command is typically used by a wrapper script that writes the packet as
+the first message on an SSH-agent connection, consumes the acknowledgement,
+and then relays agent traffic over that same connection. Context applies to
+all signing requests on that connection.
+
 ## Production build
 
 Install the pinned toolchain and JavaScript dependencies, then build the
