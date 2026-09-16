@@ -1,6 +1,6 @@
 {
   "name": "agent-witness",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "A remote SSH agent that lets autonomous agents securely authenticate using keys that never leave your devices",
   "license": "MIT",
