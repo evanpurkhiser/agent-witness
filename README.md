@@ -4,6 +4,8 @@
 
 A remote SSH agent for headless agents, with signing on your phone.
 
+## Why would I need this?
+
 You can direct an agent running on a server from your phone, but it still needs
 to authenticate as you when it pushes code or connects to another machine.
 agent-witness lets it use your SSH keys while keeping the private keys on your
