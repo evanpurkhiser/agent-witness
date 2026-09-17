@@ -6,12 +6,22 @@ const InstalledApp = lazy(() =>
   import('./InstalledApp').then(module => ({default: module.InstalledApp})),
 );
 
+const PreviewApp = lazy(() => import('./PreviewApp'));
+
 function isInstalled(): boolean {
   return window.matchMedia('(display-mode: standalone)').matches;
 }
 
 export function App() {
   const [useInBrowser, setUseInBrowser] = useState(false);
+
+  if (import.meta.env.DEV && new URLSearchParams(window.location.search).has('preview')) {
+    return (
+      <Suspense>
+        <PreviewApp />
+      </Suspense>
+    );
+  }
 
   if (!isInstalled() && !useInBrowser) {
     return <InstallScreen onContinue={() => setUseInBrowser(true)} />;
