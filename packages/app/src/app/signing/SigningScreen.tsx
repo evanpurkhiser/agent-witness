@@ -1,3 +1,5 @@
+import type {ReactNode} from 'react';
+
 import type {ConnectionSnapshot} from 'app/remote/session';
 import type {
   AuthorizationRequestView,
@@ -18,6 +20,7 @@ interface SigningScreenProps {
   vault: VaultSnapshot;
   working: boolean;
   error: string | null;
+  configuration?: ReactNode;
   onCreateVault(): void;
   onForgetPairing(): void;
   onAuthorize(): void;
@@ -33,6 +36,7 @@ export function SigningScreen({
   onCreateVault,
   onForgetPairing,
   onAuthorize,
+  configuration = <ConfigurationMenu />,
 }: SigningScreenProps) {
   return (
     <main className="bg-canvas text-foreground fixed inset-0 grid grid-rows-[minmax(0,1fr)_auto] gap-3 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(0.75rem,env(safe-area-inset-bottom))] font-mono">
@@ -56,7 +60,7 @@ export function SigningScreen({
         />
         <div className="flex items-center justify-between">
           <ConnectionStatus status={connection.status} />
-          <ConfigurationMenu />
+          {configuration}
         </div>
       </footer>
     </main>
