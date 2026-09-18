@@ -78,7 +78,8 @@ describe('creating and unlocking', () => {
 
   it('unlocks a locked vault with the right passkey', async () => {
     const created = params();
-    const locked = (await createUnlocked(await freshStore(), created)).lock();
+    const vault = await createUnlocked(await freshStore(), created);
+    const locked = vault.lock();
 
     const unlocked = await locked.unlock(created.prfOutput);
 
@@ -86,7 +87,8 @@ describe('creating and unlocking', () => {
   });
 
   it('rejects unlocking with the wrong passkey', async () => {
-    const locked = (await createUnlocked(await freshStore())).lock();
+    const vault = await createUnlocked(await freshStore());
+    const locked = vault.lock();
 
     await expect(locked.unlock(random(32))).rejects.toThrow(WrongPasskey);
   });
@@ -94,9 +96,8 @@ describe('creating and unlocking', () => {
 
 describe('managing keys', () => {
   it('adds a key and records its metadata', async () => {
-    const unlocked = await (
-      await createUnlocked(await freshStore())
-    ).addKey(keyFixture('ed25519'));
+    const vault = await createUnlocked(await freshStore());
+    const unlocked = await vault.addKey(keyFixture('ed25519'));
 
     expect(unlocked.vault.keys).toHaveLength(1);
     const [key] = unlocked.vault.keys;
@@ -107,30 +108,30 @@ describe('managing keys', () => {
 
   it('stores the encrypted key blob alongside the metadata', async () => {
     const store = await freshStore();
-    const unlocked = await (await createUnlocked(store)).addKey(keyFixture('ed25519'));
+    const vault = await createUnlocked(store);
+    const unlocked = await vault.addKey(keyFixture('ed25519'));
 
     expect(await store.getKey(unlocked.vault.keys[0].id)).not.toBeNull();
   });
 
   it('honors an explicit key comment', async () => {
-    const unlocked = await (
-      await createUnlocked(await freshStore())
-    ).addKey(keyFixture('ed25519'), 'work laptop');
+    const vault = await createUnlocked(await freshStore());
+    const unlocked = await vault.addKey(keyFixture('ed25519'), 'work laptop');
 
     expect(unlocked.vault.keys[0].comment).toBe('work laptop');
   });
 
   it('rejects a duplicate key', async () => {
-    const unlocked = await (
-      await createUnlocked(await freshStore())
-    ).addKey(keyFixture('ed25519'));
+    const vault = await createUnlocked(await freshStore());
+    const unlocked = await vault.addKey(keyFixture('ed25519'));
 
     await expect(unlocked.addKey(keyFixture('ed25519'))).rejects.toThrow(DuplicateKey);
   });
 
   it('removes a key and its blob', async () => {
     const store = await freshStore();
-    const unlocked = await (await createUnlocked(store)).addKey(keyFixture('ed25519'));
+    const vault = await createUnlocked(store);
+    const unlocked = await vault.addKey(keyFixture('ed25519'));
     const {id} = unlocked.vault.keys[0];
 
     const after = await unlocked.removeKey(id);
@@ -141,7 +142,8 @@ describe('managing keys', () => {
 
   it('removes a key while locked', async () => {
     const store = await freshStore();
-    const unlocked = await (await createUnlocked(store)).addKey(keyFixture('ed25519'));
+    const vault = await createUnlocked(store);
+    const unlocked = await vault.addKey(keyFixture('ed25519'));
     const {id} = unlocked.vault.keys[0];
 
     const after = await unlocked.lock().removeKey(id);
@@ -154,7 +156,8 @@ describe('managing keys', () => {
 describe('destroying', () => {
   it('deletes the vault and its keys', async () => {
     const store = await freshStore();
-    const unlocked = await (await createUnlocked(store)).addKey(keyFixture('ed25519'));
+    const vault = await createUnlocked(store);
+    const unlocked = await vault.addKey(keyFixture('ed25519'));
     const {id} = unlocked.vault.keys[0];
 
     const empty = await unlocked.destroy();

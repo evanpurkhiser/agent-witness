@@ -27,7 +27,8 @@ export function KeyList() {
     setReadingClipboard(true);
 
     try {
-      const pem = (await navigator.clipboard.readText()).trim();
+      const clipboardText = await navigator.clipboard.readText();
+      const pem = clipboardText.trim();
       if (pem === '') {
         setClipboardError('The clipboard is empty.');
         return;

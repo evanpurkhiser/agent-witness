@@ -208,8 +208,8 @@ importers:
   .:
     devDependencies:
       '@evanpurkhiser/oxc-config':
-        specifier: ^0.8.0
-        version: 0.8.0(oxlint@1.74.0)
+        specifier: ^0.16.0
+        version: 0.16.0(oxlint@1.74.0)
       oxfmt:
         specifier: ^0.47.0
         version: 0.47.0
@@ -556,8 +556,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@evanpurkhiser/oxc-config@0.8.0':
-    resolution: {integrity: sha512-hk2a8Jk30Gn8WxOKqiaIKxmxloQeTtVv30doXpTrS9gXV9ive6sLJc1XGvaR56cSpEK2zjWBMZnktLS31a/c2w==}
+  '@evanpurkhiser/oxc-config@0.16.0':
+    resolution: {integrity: sha512-FGJRko0Y/XvXrhSQLwRB3Cfd7tz6niEosLWUECtRtzCKojvRd9o4CprXfultUPab0/9PzKX2gEf+3X/IMZieTQ==}
     peerDependencies:
       oxlint: '>=1.56.0'
 
@@ -1863,7 +1863,7 @@ snapshots:
   '@esbuild/win32-x64@0.28.1':
     optional: true
 
-  '@evanpurkhiser/oxc-config@0.8.0(oxlint@1.74.0)':
+  '@evanpurkhiser/oxc-config@0.16.0(oxlint@1.74.0)':
     dependencies:
       oxlint: 1.74.0
 

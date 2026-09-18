@@ -37,7 +37,8 @@ describe('vault agent backend', () => {
   });
 
   it('lists the vault identities while locked', async () => {
-    const vault = (await unlockedWithKey()).lock();
+    const unlocked = await unlockedWithKey();
+    const vault = unlocked.lock();
 
     const backend = vault.agentBackend();
     const identities = await backend.listIdentities();
