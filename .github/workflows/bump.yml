@@ -52,7 +52,7 @@ jobs:
       - name: Ensure checks are passing on the release base
         run: |
           SHA=$(git rev-parse HEAD)
-          for workflow in lint.yml build.yml; do
+          for workflow in lint.yml test.yml build.yml; do
             RUN_ID=$(gh run list --workflow="$workflow" --branch=main --event=push \
               --commit "$SHA" --limit=1 --json databaseId --jq '.[0].databaseId // empty')
             if [[ -z "$RUN_ID" ]]; then
