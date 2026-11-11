@@ -1,25 +1,28 @@
 # Server design
 
-This document describes the implementation structure and dependency choices for
-the Rust server. `SPEC.md` remains the source of truth for system behavior and
-security boundaries; this document explains how to organize the server code to
-implement that design incrementally.
+This document describes the implementation structure and dependency choices
+for the Rust server.
+`SPEC.md` remains the source of truth for system behavior
+and security boundaries;
+this document explains how to organize the server code to implement
+that design incrementally.
 
 ## Design principles
 
 - Identity-list requests are answered from the paired client's persisted public
-  metadata. Requests that need the remote worker enter the broker queue.
+  metadata.
+  Requests that need the remote worker enter the broker queue.
 - The broker is the only component that decides when to queue, dispatch,
   requeue, cancel, expire, or fail a request.
-- Socket and WebSocket handlers are adapters. They translate I/O into broker
-  events and broker effects back into I/O.
+- Socket and WebSocket handlers are adapters.
+  They translate I/O into broker events and broker effects back into I/O.
 - Pairing state has one owner and is changed atomically.
 - The SSH-agent socket and administrative control socket are separate trust
   boundaries.
-- Protocol types live with the protocol that owns them. Avoid generic
-  `types.rs`, `utils.rs`, and `error.rs` modules.
-- Start with cohesive single files and split them only when independent
-  responsibilities emerge.
+- Protocol types live with the protocol that owns them.
+  Avoid generic `types.rs`, `utils.rs`, and `error.rs` modules.
+- Start with cohesive single files and split them only
+  when independent responsibilities emerge.
 
 ## Target layout
 
@@ -82,15 +85,15 @@ paired-client identities ────┘                     └────→ 
 control IPC ──────────→ daemon / pairing
 ```
 
-The broker must not depend on an I/O adapter. Adapters may depend on the
-broker's public handle and protocol types.
+The broker must not depend on an I/O adapter.
+Adapters may depend on the broker's public handle and protocol types.
 
 ## Crate identity
 
-Rename the package from the scaffolded `server` name to
-`agent-witness-server`. Keep the installed binary named `agent-witness`. The
-library crate is then imported as `agent_witness_server`, which distinguishes
-server internals from the product-wide binary name.
+Rename the package from the scaffolded `server` name to `agent-witness-server`.
+Keep the installed binary named `agent-witness`.
+The library crate is then imported as `agent_witness_server`,
+which distinguishes server internals from the product-wide binary name.
 
 ## Entrypoints
 
@@ -105,8 +108,8 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-It should not contain configuration loading, listener setup, or protocol
-handling.
+It should not contain configuration loading, listener setup,
+or protocol handling.
 
 ### `cli.rs`
 
@@ -119,14 +122,16 @@ agent-witness stats
 agent-witness pairing clear
 ```
 
-`serve` calls `daemon::run`. The other commands use `control::client` to perform
-one request against the running daemon. The CLI formats human-readable or JSON
-output but does not read or mutate daemon state directly.
+`serve` calls `daemon::run`.
+The other commands use `control::client` to perform one request against the
+running daemon.
+The CLI formats human-readable or JSON output but does not read
+or mutate daemon state directly.
 
 ### `lib.rs`
 
-The library root exposes the modules needed by the binary and integration
-tests. Internal implementation details should remain private by default.
+The library root exposes the modules needed by the binary and integration tests.
+Internal implementation details should remain private by default.
 
 ## Daemon and configuration
 
@@ -169,10 +174,10 @@ Storage owns mutable durable state:
 - Credential hash
 - Optional push subscription
 
-State is small enough for a JSON file. Updates should write a temporary file in
-the same directory, flush it, atomically rename it, and preserve restrictive
-permissions. Pending agent requests and process-lifetime statistics are not
-persisted.
+State is small enough for a JSON file.
+Updates should write a temporary file in the same directory, flush it,
+atomically rename it, and preserve restrictive permissions.
+Pending agent requests and process-lifetime statistics are not persisted.
 
 Configuration and mutable state must remain separate.
 
@@ -182,17 +187,18 @@ The broker is the center of the server and the sole owner of request state.
 
 ### `request_router.rs`
 
-The request router is the boundary between local SSH-agent transport and remote
-request lifecycle management. It owns the current cached identities answer and
-routes each complete `PacketRequest`:
+The request router is the boundary between local SSH-agent transport
+and remote request lifecycle management.
+It owns the current cached identities answer
+and routes each complete `PacketRequest`:
 
-- Answer an identity-list request locally when the paired client has supplied
-  an authoritative identity snapshot.
-- Forward the original request, response channel, and cancellation token to the
-  broker for every request requiring remote work.
+- Answer an identity-list request locally
+  when the paired client has supplied an authoritative identity snapshot.
+- Forward the original request, response channel,
+  and cancellation token to the broker for every request requiring remote work.
 
-An unknown identity cache follows the remote path for compatibility. A known
-empty cache produces an empty identities answer locally.
+An unknown identity cache follows the remote path for compatibility.
+A known empty cache produces an empty identities answer locally.
 
 ### `broker/model.rs`
 
@@ -214,8 +220,8 @@ Its main interface is conceptually:
 fn apply(&mut self, event: Event, now: Instant) -> Vec<Effect>;
 ```
 
-Events update facts. Reconciliation then produces effects based on the current
-gates:
+Events update facts.
+Reconciliation then produces effects based on the current gates:
 
 ```text
 request queued
@@ -225,13 +231,14 @@ request queued
   = dispatch permitted
 ```
 
-The remote capacity bounds requests delivered to the worker but not yet
-answered, including requests buffered while its vault is locked. Readiness is
-tracked for status and client behavior, not as a server dispatch gate.
+The remote capacity bounds requests delivered to the worker but not
+yet answered, including requests buffered while its vault is locked.
+Readiness is tracked for status and client behavior,
+not as a server dispatch gate.
 
-The model knows nothing about Tokio sockets, WebSockets, JSON, files, or Web
-Push. Most state-transition and edge-case tests should exercise this module
-directly.
+The model knows nothing about Tokio sockets, WebSockets, JSON, files,
+or Web Push.
+Most state-transition and edge-case tests should exercise this module directly.
 
 ### `broker/task.rs`
 
@@ -256,12 +263,14 @@ let socket_task = socket.serve(local_requests, shutdown);
 ```
 
 The socket, router, and broker depend on the neutral `PacketRequest` channel
-protocol in `packet.rs`. Request-level failures such as timeout and queue
-exhaustion also live there rather than in the broker's control error. Each
-packet carries a child cancellation token owned by its local connection. The
-router preserves that token when forwarding; the broker watches it, removes
-cancelled queued requests, and forwards cancellation for active remote
-attempts. The handle used by remote and control adapters remains narrow:
+protocol in `packet.rs`.
+Request-level failures such as timeout
+and queue exhaustion also live there rather than in the broker's control error.
+Each packet carries a child cancellation token owned by its local connection.
+The router preserves that token when forwarding; the broker watches it,
+removes cancelled queued requests,
+and forwards cancellation for active remote attempts.
+The handle used by remote and control adapters remains narrow:
 
 ```rust
 impl BrokerHandle {
@@ -273,13 +282,14 @@ impl BrokerHandle {
 }
 ```
 
-Every `PacketRequest` received by the broker enters the queue. Local identity
-responses never reach this layer.
+Every `PacketRequest` received by the broker enters the queue.
+Local identity responses never reach this layer.
 
 ### `broker/mod.rs`
 
 The module root defines or re-exports the public handle, events, effects,
-snapshots, and identifiers. Internal queue structures remain private.
+snapshots, and identifiers.
+Internal queue structures remain private.
 
 ## I/O adapters
 
@@ -296,9 +306,11 @@ The local SSH-agent adapter:
 It does not inspect SSH message types or remote-agent readiness.
 
 `mod.rs` is the public facade and keeps the socket-file ownership guard alive
-for the listener's lifetime. `file.rs` owns safe binding, stale-socket
-detection, permissions, and inode-aware cleanup. `listener.rs` owns the accept
-loop, connection tasks, packet framing, and cancellation-token propagation.
+for the listener's lifetime.
+`file.rs` owns safe binding, stale-socket detection, permissions,
+and inode-aware cleanup.
+`listener.rs` owns the accept loop, connection tasks, packet framing,
+and cancellation-token propagation.
 
 ### `remote/protocol.rs`
 
@@ -311,10 +323,11 @@ This module defines serialization for:
 - Heartbeats
 
 The protocol uses named-field MessagePack values derived from explicit Serde
-types. UUIDs remain hyphenated strings, while credentials and raw,
-length-prefixed SSH-agent packets use MessagePack binary values. Rust and
-TypeScript share semantic fixtures rather than maintaining separate manual
-codecs.
+types.
+UUIDs remain hyphenated strings, while credentials and raw,
+length-prefixed SSH-agent packets use MessagePack binary values.
+Rust and TypeScript share semantic fixtures rather than maintaining separate
+manual codecs.
 
 ### `remote/session.rs`
 
@@ -330,8 +343,8 @@ It cannot directly inspect or mutate the request queue.
 
 ### `control/protocol.rs`
 
-Defines the versioned, length-prefixed JSON request/response protocol for
-status, statistics, and clearing pairing.
+Defines the versioned, length-prefixed JSON request/response protocol
+for status, statistics, and clearing pairing.
 
 ### `control/server.rs`
 
@@ -366,23 +379,24 @@ Pairing owns the single paired-client lifecycle:
   socket.
 - Clear pairing.
 
-Clearing pairing persists the unpaired state before invalidating the active
-session. Push-subscription writes carry the authenticated client ID and are
-rejected if the pairing has since been cleared or replaced. A failed persistent
-update closes the authenticated session.
+Clearing pairing persists the unpaired state
+before invalidating the active session.
+Push-subscription writes carry the authenticated client ID and are rejected
+if the pairing has since been cleared or replaced.
+A failed persistent update closes the authenticated session.
 
 ### `stats.rs`
 
-Statistics begin as a cloneable set of atomic counters. Exact cross-counter
-snapshot consistency is not required, but every snapshot includes the
-collection start time.
+Statistics begin as a cloneable set of atomic counters.
+Exact cross-counter snapshot consistency is not required,
+but every snapshot includes the collection start time.
 
 No general metrics framework is needed initially.
 
 ### `push.rs`
 
-Push delivery consumes coalesced wake effects emitted while no remote worker is
-connected:
+Push delivery consumes coalesced wake effects emitted
+while no remote worker is connected:
 
 - Build the non-sensitive wake-up payload.
 - Encrypt and authenticate it for Web Push.
@@ -428,17 +442,18 @@ src/
     tests.rs
 ```
 
-Phase 1 already gives the pure model and Tokio actor substantial independent
-responsibilities, so the broker starts split rather than growing through one
-large transitional file.
+Phase 1 already gives the pure model
+and Tokio actor substantial independent responsibilities,
+so the broker starts split rather than growing through one large transitional
+file.
 
-Add the `control`, `remote`, and `web` directories with their corresponding
-increments.
+Add the `control`, `remote`,
+and `web` directories with their corresponding increments.
 
 ## Dependencies
 
-Dependency versions below indicate intended compatibility lines. `Cargo.lock`
-pins the exact versions used to build the application.
+Dependency versions below indicate intended compatibility lines.
+`Cargo.lock` pins the exact versions used to build the application.
 
 ### Foundation
 
@@ -482,32 +497,32 @@ zeroize = { version = "1", features = ["derive"] }
 
 Responsibilities:
 
-- `tokio` provides the runtime, tasks, channels, timers, signals, and Unix/TCP
-  sockets.
-- `tokio-util` provides cancellation tokens and bounded length-delimited
-  codecs.
+- `tokio` provides the runtime, tasks, channels, timers, signals,
+  and Unix/TCP sockets.
+- `tokio-util` provides cancellation tokens and bounded length-delimited codecs.
 - `bytes` carries packet ownership between adapters and the broker.
-- `rmp-serde` encodes the named remote WebSocket protocol without copying
-  binary packet fields into text representations.
+- `rmp-serde` encodes the named remote WebSocket protocol without copying binary
+  packet fields into text representations.
 - `clap` defines the nested CLI.
-- `figment` layers serialized defaults, an optional TOML file, and explicit CLI
-  overrides.
+- `figment` layers serialized defaults, an optional TOML file,
+  and explicit CLI overrides.
 - `serde` and `serde_json` encode control messages and persistent state.
-- `humantime` parses duration CLI overrides, and `humantime-serde` parses
-  configuration values such as `request_timeout = "90s"`.
+- `humantime` parses duration CLI overrides,
+  and `humantime-serde` parses configuration values such
+  as `request_timeout = "90s"`.
 - `uuid` provides request, client, and session identifiers.
 - `getrandom` creates high-entropy pairing credentials.
-- `sha2`, `subtle`, and `zeroize` hash credentials, compare them in constant
-  time, and clear temporary secret buffers.
-- `time` represents persisted and displayed timestamps. Broker deadlines use
-  `std::time::Instant`.
-- `thiserror` defines structured subsystem errors. `anyhow` is restricted to
-  top-level CLI and daemon error context.
-- `tracing` and `tracing-subscriber` provide human-readable and optional JSON
-  logs.
+- `sha2`, `subtle`, and `zeroize` hash credentials,
+  compare them in constant time, and clear temporary secret buffers.
+- `time` represents persisted and displayed timestamps.
+  Broker deadlines use `std::time::Instant`.
+- `thiserror` defines structured subsystem errors.
+  `anyhow` is restricted to top-level CLI and daemon error context.
+- `tracing` and `tracing-subscriber` provide human-readable
+  and optional JSON logs.
 
-Tokio's Unix stream API provides peer credentials on supported platforms, so
-the initial implementation does not need `nix`.
+Tokio's Unix stream API provides peer credentials on supported platforms,
+so the initial implementation does not need `nix`.
 
 ### HTTP and WebSocket
 
@@ -518,14 +533,16 @@ axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", features = ["trace"] }
 ```
 
-Axum's built-in WebSocket support is sufficient. Do not add a second WebSocket
-server implementation. `futures-util` supplies the stream and sink extension
-traits used by WebSocket sessions.
+Axum's built-in WebSocket support is sufficient.
+Do not add a second WebSocket server implementation.
+`futures-util` supplies the stream
+and sink extension traits used by WebSocket sessions.
 
-The remote protocol uses `rmp-serde` with named fields. Its browser counterpart
-uses `@msgpack/msgpack`. Avoid relying on `rmp-serde`'s positional struct or
-default enum representations; explicit names and tags are part of the wire
-contract.
+The remote protocol uses `rmp-serde` with named fields.
+Its browser counterpart uses `@msgpack/msgpack`.
+Avoid relying on `rmp-serde`'s positional struct
+or default enum representations;
+explicit names and tags are part of the wire contract.
 
 ### Frontend assets
 
@@ -536,22 +553,24 @@ mime_guess = "2"
 rust-embed = "8"
 ```
 
-Packaging should build the frontend explicitly before compiling the release
-server. Avoid hiding pnpm invocation inside `build.rs`.
+Packaging should build the frontend explicitly
+before compiling the release server.
+Avoid hiding pnpm invocation inside `build.rs`.
 
 The `embedded-ui` Cargo feature adds the built Vite output to the server binary.
 It remains opt-in so normal Rust development does not require a populated
-frontend `dist` directory. The root production build command owns the required
-ordering:
+frontend `dist` directory.
+The root production build command owns the required ordering:
 
 ```console
 pnpm install --frozen-lockfile
 pnpm build:production
 ```
 
-This builds `packages/app/dist` before running the locked release build with
-`embedded-ui`. Missing frontend output must fail the release build rather than
-silently producing a server without its browser application.
+This builds `packages/app/dist`
+before running the locked release build with `embedded-ui`.
+Missing frontend output must fail the release build rather than silently
+producing a server without its browser application.
 
 ### Web Push
 
@@ -561,9 +580,9 @@ VAPID key generation uses:
 p256 = { version = "0.13", default-features = false, features = ["arithmetic"] }
 ```
 
-The private scalar is stored separately with mode `0600`; the uncompressed
-public point is derived at startup and included in successful remote
-handshakes.
+The private scalar is stored separately with mode `0600`;
+the uncompressed public point is derived at startup
+and included in successful remote handshakes.
 
 The provisional choice for push request construction and delivery is:
 
@@ -576,21 +595,23 @@ reqwest = { version = "0.13", default-features = false, features = [
 ```
 
 `web-push-native` builds the encrypted and VAPID-authenticated HTTP request;
-`reqwest` sends it using Rustls. Verify this combination against a real iOS Web
-Push subscription in a small interoperability spike before making it a core
-dependency.
+`reqwest` sends it using Rustls.
+Verify this combination against a real iOS Web Push subscription in a small
+interoperability spike before making it a core dependency.
 
-The higher-level `web-push` crate remains an alternative, but its transport
-dependency alignment and TLS backend should be evaluated before adoption.
+The higher-level `web-push` crate remains an alternative,
+but its transport dependency alignment and TLS backend should be evaluated
+before adoption.
 
 ### TLS
 
-Do not add a direct TLS dependency initially. Production deployments can
-terminate TLS with Tailscale Serve, Caddy, or another local reverse proxy.
+Do not add a direct TLS dependency initially.
+Production deployments can terminate TLS with Tailscale Serve, Caddy,
+or another local reverse proxy.
 
-If direct TLS becomes a requirement, choose the Rustls integration in a
-separate increment that also addresses certificate loading, reloads, and
-operational ownership.
+If direct TLS becomes a requirement,
+choose the Rustls integration in a separate increment
+that also addresses certificate loading, reloads, and operational ownership.
 
 ### Development dependencies
 
@@ -610,16 +631,16 @@ tower = { version = "0.5", features = ["util"] }
 - `tower` tests the Axum router without opening a TCP listener.
 - `assert_cmd` and `predicates` cover CLI behavior.
 
-Prefer small handwritten fakes over a mocking framework. The broker's explicit
-event/effect boundary should make fakes straightforward.
+Prefer small handwritten fakes over a mocking framework.
+The broker's explicit event/effect boundary should make fakes straightforward.
 
 ## Deliberately omitted dependencies
 
 - No database or SQL toolkit; persisted state is one small JSON document.
-- No `dashmap`, `parking_lot`, or crossbeam queue; the broker actor owns mutable
-  request state on one task.
+- No `dashmap`, `parking_lot`, or crossbeam queue;
+  the broker actor owns mutable request state on one task.
 - No general metrics framework; process-lifetime atomic counters are enough.
-- No `nix` until an operation cannot be implemented safely through Tokio or the
-  standard library.
+- No `nix` until an operation cannot be implemented safely through Tokio
+  or the standard library.
 - No direct TLS stack until the deployment model requires it.
 - No mocking framework.
